@@ -1,0 +1,265 @@
+package veld
+
+import "core:fmt"
+
+
+// Compiler state =================================================================================
+
+// Compiler is package-local scratch state for building one Code object.
+// VM is host-owned runtime state; Compiler is not.
+Compiler := struct {
+	code:         Code,
+	error_string: string,
+	stack_depth:  int,
+}{}
+
+
+// Bytecode emission ==============================================================================
+
+emit_inst :: proc(op: Op, arg: u32 = 0) {
+	inst := Inst {
+		op  = op,
+		arg = arg,
+	}
+
+	append(&Compiler.code.bytecode, u32(inst))
+}
+
+require_stack :: proc(word: string, count: int) -> bool {
+	if Compiler.stack_depth >= count {
+		return true
+	}
+
+	Compiler.error_string = fmt.tprintf("%s needs %d stack values", word, count)
+	return false
+}
+
+
+// Constants ======================================================================================
+
+const_int :: proc(value: i64) -> u32 {
+	append(&Compiler.code.const_pool, Value(value))
+	return u32(len(Compiler.code.const_pool) - 1)
+}
+
+const_float :: proc(value: f64) -> u32 {
+	append(&Compiler.code.const_pool, Value(value))
+	return u32(len(Compiler.code.const_pool) - 1)
+}
+
+const_string :: proc(text: string) -> u32 {
+	object := new_string_object(text)
+	append(&Compiler.code.const_pool, Value(&object.header))
+	return u32(len(Compiler.code.const_pool) - 1)
+}
+
+
+// Source compilation =============================================================================
+
+compile_source :: proc(source: string) -> (Code, string) {
+	begin_lex(source)
+
+	clear(&Compiler.code.bytecode)
+	clear(&Compiler.code.const_pool)
+	Compiler.error_string = ""
+	Compiler.stack_depth = 0
+
+	for {
+		token := lex_next_token()
+
+		switch token.kind {
+		case .EOF:
+			return Compiler.code, ""
+
+		case .ERROR:
+			Compiler.error_string = token.value.(string)
+			return {}, Compiler.error_string
+
+		case .INT:
+			value := token.value.(i64)
+			const_index := const_int(value)
+			emit_inst(.PUSH_CONST, const_index)
+			Compiler.stack_depth += 1
+
+		case .FLOAT:
+			value := token.value.(f64)
+			const_index := const_float(value)
+			emit_inst(.PUSH_CONST, const_index)
+			Compiler.stack_depth += 1
+
+		case .STRING:
+			text := token.value.(string)
+			const_index := const_string(text)
+			emit_inst(.PUSH_CONST, const_index)
+			Compiler.stack_depth += 1
+
+		case .WORD:
+			word := token.value.(string)
+
+			switch word {
+			case "+":
+				if !require_stack(word, 2) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.ADD)
+				Compiler.stack_depth -= 1
+
+			case "-":
+				if !require_stack(word, 2) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.SUB)
+				Compiler.stack_depth -= 1
+
+			case "*":
+				if !require_stack(word, 2) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.MUL)
+				Compiler.stack_depth -= 1
+
+			case "/":
+				if !require_stack(word, 2) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.DIV)
+				Compiler.stack_depth -= 1
+
+			case "dup":
+				if !require_stack(word, 1) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.DUP)
+				Compiler.stack_depth += 1
+
+			case "drop":
+				if !require_stack(word, 1) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.DROP)
+				Compiler.stack_depth -= 1
+
+			case "swap":
+				if !require_stack(word, 2) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.SWAP)
+
+			case "over":
+				if !require_stack(word, 2) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.OVER)
+				Compiler.stack_depth += 1
+
+			case "write":
+				if !require_stack(word, 1) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.WRITE)
+				Compiler.stack_depth -= 1
+
+			case "print":
+				if !require_stack(word, 1) {
+					return {}, Compiler.error_string
+				}
+
+				emit_inst(.PRINT)
+				Compiler.stack_depth -= 1
+
+			case "nl":
+				emit_inst(.NEWLINE)
+
+			case:
+				Compiler.error_string = fmt.tprintf("unknown word: %s", word)
+				return {}, Compiler.error_string
+			}
+		}
+	}
+}
+
+
+// Debug ==========================================================================================
+
+op_to_string :: proc(op: Op) -> string {
+	switch op {
+	case .PUSH_CONST:
+		return "PUSH_CONST"
+
+	case .ADD:
+		return "ADD"
+	case .SUB:
+		return "SUB"
+	case .MUL:
+		return "MUL"
+	case .DIV:
+		return "DIV"
+
+	case .DUP:
+		return "DUP"
+	case .DROP:
+		return "DROP"
+	case .SWAP:
+		return "SWAP"
+	case .OVER:
+		return "OVER"
+
+	case .WRITE:
+		return "WRITE"
+	case .PRINT:
+		return "PRINT"
+	case .NEWLINE:
+		return "NL"
+	}
+
+	return "UNKNOWN"
+}
+
+debug_print_code :: proc(code: ^Code) {
+	fmt.println("CONSTANTS:")
+
+	for index := 0; index < len(code.const_pool); index += 1 {
+		value := code.const_pool[index]
+
+		switch v in value {
+		case i64:
+			fmt.printf("  %04d %-6s %d\n", index, "INT", v)
+
+		case f64:
+			fmt.printf("  %04d %-6s %g\n", index, "FLOAT", v)
+
+		case ^ObjectHeader:
+			switch v.kind {
+			case .STRING:
+				object := cast(^StringObject)v
+				fmt.printf("  %04d %-6s \"%s\"\n", index, "STRING", object.text)
+
+			case:
+				assert(false, "invalid object tag")
+			}
+		}
+	}
+
+	fmt.println("")
+	fmt.println("CODE:")
+
+	for index := 0; index < len(code.bytecode); index += 1 {
+		inst := Inst(code.bytecode[index])
+		op_text := op_to_string(inst.op)
+
+		if inst.op == .PUSH_CONST {
+			fmt.printf("  %04d %-10s %d\n", index, op_text, inst.arg)
+		} else {
+			fmt.printf("  %04d %s\n", index, op_text)
+		}
+	}
+}
