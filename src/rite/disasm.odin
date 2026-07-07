@@ -271,6 +271,10 @@ disasm_append_code :: proc(parts: ^[dynamic]string, code: ^Code) {
 			inst := InstABx(word)
 			disasm_append_inst(parts, ip, "JUMP_IF_FALSEY", fmt.tprintf("R%d, %d", inst.a, inst.b), "")
 
+		case .JUMP_IF_NIL:
+			inst := InstABx(word)
+			disasm_append_inst(parts, ip, "JUMP_IF_NIL", fmt.tprintf("R%d, %d", inst.a, inst.b), "")
+
 		case .JUMP_IF_NOT_LESS, .JUMP_IF_NOT_LESS_EQUAL, .JUMP_IF_NOT_GREATER, .JUMP_IF_NOT_GREATER_EQUAL:
 			inst := InstABC(word)
 			target := code.bytecode[ip + 1]

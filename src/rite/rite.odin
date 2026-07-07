@@ -141,6 +141,7 @@ Opcode :: enum u8 {
 
 	JUMP,           // Ax: A=target instruction index
 	JUMP_IF_FALSEY, // ABx: A=cond_slot, Bx=target instruction index
+	JUMP_IF_NIL,    // ABx: A=slot, Bx=target instruction index
 	JUMP_IF_NOT_LESS,          // ABC + target word: A=lhs, B=rhs
 	JUMP_IF_NOT_LESS_EQUAL,    // ABC + target word: A=lhs, B=rhs
 	JUMP_IF_NOT_GREATER,       // ABC + target word: A=lhs, B=rhs
@@ -1936,6 +1937,12 @@ emit_jump_if_falsey :: proc(builder: ^CodeBuilder, cond_slot, target_index: int)
 	emit_ABx(builder, .JUMP_IF_FALSEY, cond_slot, target_index)
 }
 
+emit_jump_if_nil :: proc(builder: ^CodeBuilder, slot, target_index: int) {
+	assert(target_index >= 0 && target_index <= int(max(u16)), "jump target does not fit u16")
+	record_slots(builder, slot)
+	emit_ABx(builder, .JUMP_IF_NIL, slot, target_index)
+}
+
 emit_compare_jump :: proc(builder: ^CodeBuilder, op: Opcode, lhs_slot, rhs_slot, target_index: int) {
 	assert(op == .JUMP_IF_NOT_LESS ||
 	       op == .JUMP_IF_NOT_LESS_EQUAL ||
@@ -1957,10 +1964,10 @@ patch_jump_target :: proc(builder: ^CodeBuilder, jump_index, target_index: int) 
 		return
 	}
 
-	if op == .JUMP_IF_FALSEY {
+	if op == .JUMP_IF_FALSEY || op == .JUMP_IF_NIL {
 		assert(target_index >= 0 && target_index <= int(max(u16)), "jump target does not fit u16")
 		old := InstABx(builder.bytecode[jump_index])
-		builder.bytecode[jump_index] = u32(InstABx{op = .JUMP_IF_FALSEY, a = old.a, b = u16(target_index)})
+		builder.bytecode[jump_index] = u32(InstABx{op = op, a = old.a, b = u16(target_index)})
 		return
 	}
 
@@ -2021,6 +2028,9 @@ symbol_is_reserved_word :: proc(symbol: ^SymbolObject) -> bool {
 	       symbol.text == "do" ||
 	       symbol.text == "if" ||
 	       symbol.text == "while" ||
+	       symbol.text == "and" ||
+	       symbol.text == "or" ||
+	       symbol.text == "??" ||
 	       symbol.text == "fn" ||
 	       symbol.text == "import" ||
 	       symbol.text == "export" ||
@@ -3020,6 +3030,98 @@ compile_if :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	patch_jump_target(builder, end_jump, len(builder.bytecode))
 }
 
+compile_and :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
+	if len(list.items) == 1 {
+		emit_load_true(builder, dst)
+		return
+	}
+
+	false_jumps := make([dynamic]int)
+	defer delete(false_jumps)
+
+	for i := 1; i < len(list.items); i += 1 {
+		compile_expr(builder, list.items[i], dst)
+		if Compiler.failed { return }
+
+		append(&false_jumps, len(builder.bytecode))
+		emit_jump_if_falsey(builder, dst, 0)
+	}
+
+	emit_load_true(builder, dst)
+
+	end_jump := len(builder.bytecode)
+	emit_jump(builder, 0)
+
+	false_label := len(builder.bytecode)
+	for jump in false_jumps {
+		patch_jump_target(builder, jump, false_label)
+	}
+
+	emit_load_false(builder, dst)
+	patch_jump_target(builder, end_jump, len(builder.bytecode))
+}
+
+compile_or :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
+	if len(list.items) == 1 {
+		emit_load_false(builder, dst)
+		return
+	}
+
+	end_jumps := make([dynamic]int)
+	defer delete(end_jumps)
+
+	for i := 1; i < len(list.items); i += 1 {
+		compile_expr(builder, list.items[i], dst)
+		if Compiler.failed { return }
+
+		false_jump := len(builder.bytecode)
+		emit_jump_if_falsey(builder, dst, 0)
+
+		emit_load_true(builder, dst)
+
+		append(&end_jumps, len(builder.bytecode))
+		emit_jump(builder, 0)
+
+		patch_jump_target(builder, false_jump, len(builder.bytecode))
+	}
+
+	emit_load_false(builder, dst)
+
+	for jump in end_jumps {
+		patch_jump_target(builder, jump, len(builder.bytecode))
+	}
+}
+
+compile_nil_fallback :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
+	if len(list.items) == 1 {
+		emit_load_nil(builder, dst)
+		return
+	}
+
+	end_jumps := make([dynamic]int)
+	defer delete(end_jumps)
+
+	for i := 1; i < len(list.items) - 1; i += 1 {
+		compile_expr(builder, list.items[i], dst)
+		if Compiler.failed { return }
+
+		nil_jump := len(builder.bytecode)
+		emit_jump_if_nil(builder, dst, 0)
+
+		append(&end_jumps, len(builder.bytecode))
+		emit_jump(builder, 0)
+
+		patch_jump_target(builder, nil_jump, len(builder.bytecode))
+	}
+
+	compile_expr(builder, list.items[len(list.items) - 1], dst)
+	if Compiler.failed { return }
+
+	for jump in end_jumps {
+		patch_jump_target(builder, jump, len(builder.bytecode))
+	}
+}
+
 compile_while :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if len(list.items) < 2 {
 		compile_error("`while` expects a condition")
@@ -3585,6 +3687,18 @@ compile_list_expr :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	}
 	if head.text == "while" {
 		compile_while(builder, list, dst)
+		return
+	}
+	if head.text == "and" {
+		compile_and(builder, list, dst)
+		return
+	}
+	if head.text == "or" {
+		compile_or(builder, list, dst)
+		return
+	}
+	if head.text == "??" {
+		compile_nil_fallback(builder, list, dst)
 		return
 	}
 	if head.text == "fn" {
@@ -4481,6 +4595,13 @@ run_code :: proc(code: ^Code) -> Value {
 			inst := InstABx(word)
 			cond := vm.slots[slot_base + int(inst.a)]
 			if value_is_falsey(cond) {
+				pc = int(inst.b)
+				frame.instruction_index = pc
+			}
+
+		case .JUMP_IF_NIL:
+			inst := InstABx(word)
+			if vm.slots[slot_base + int(inst.a)] == nil {
 				pc = int(inst.b)
 				frame.instruction_index = pc
 			}
