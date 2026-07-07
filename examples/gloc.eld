@@ -1,7 +1,7 @@
 ; gloc - grouped lines of code.
 ;
-; Counts non-blank, non-comment lines grouped by file extension.
-; Comment lines are lines whose trimmed text starts with ;, //, --, or #.
+; Counts non-blank, non-comment lines by file extension.
+; Comment lines start with ;, //, --, or # after trimming.
 ;
 ; Usage:
 ;
@@ -13,28 +13,27 @@
 (import "str")
 
 
-(def stats {})
-(def total-files 0)
-(def total-lines 0)
+; The stats map is mutated, but the binding itself is stable.
+(const
+  stats    {}
+  args     (os/args)
+  arg-root (if (> (len args) 0) (idx args 0) nil)
+  root     (path/clean (?? arg-root (os/env "GLOC_PATH") ".")))
 
-(def args (os/args))
-(def arg-root
-  (if (> (len args) 0)
-    (idx args 0)
-     nil))
-
-(def root
-  (path/clean (?? arg-root (os/env "GLOC_PATH") ".")))
+(def
+  total-files 0
+  total-lines 0)
 
 
-(def (ignored-dir? name)
+(const (ignored-dir? name)
   (or (= name ".git")
       (= name "_work")
       (= name "_bench")))
 
-(def (ignored-file? file)
-  (def name (path/base file))
-  (def ext (path/ext file))
+(const (ignored-file? file)
+  (const
+    name (path/base file)
+    ext  (path/ext file))
 
   (or (= name ".gitignore")
       (= name ".gitattributes")
@@ -42,8 +41,8 @@
       (= ext ".md")
       (= ext ".exe")))
 
-(def (comment-line? line)
-  (def trimmed (str/trim line))
+(const (comment-line? line)
+  (const trimmed (str/trim line))
 
   (or (= trimmed "")
       (str/prefix? trimmed ";")
@@ -51,17 +50,18 @@
       (str/prefix? trimmed "--")
       (str/prefix? trimmed "#")))
 
-(def (file-ext file)
-  (def ext (path/ext file))
+(const (file-ext file)
+  (const ext (path/ext file))
 
   (if (= ext "")
     "(none)"
     ext))
 
-(def (count-text text)
-  (def lines (str/split text "\n"))
-  (def i 0)
-  (def count 0)
+(const (count-text text)
+  (const lines (str/split text "\n"))
+  (def
+    i     0
+    count 0)
 
   (while (< i (len lines))
     (if (not (comment-line? (idx lines i)))
@@ -71,37 +71,35 @@
 
   count)
 
-(def (record-file file line-count)
-  (def ext (file-ext file))
-  (def entry
-    (?? (key stats ext)
-        (do
-          (set (key stats ext) {:files 0 :lines 0})
-          (key stats ext))))
+(const (record-file file line-count)
+  (const
+    ext   (file-ext file)
+    entry (?? (key stats ext)
+              (do
+                (set (key stats ext) {:files 0 :lines 0})
+                (key stats ext))))
 
-  (set (key entry :files)
-    (+ (key entry :files) 1))
-
-  (set (key entry :lines)
-    (+ (key entry :lines) line-count))
+  (set (key entry :files) (+ (key entry :files) 1))
+  (set (key entry :lines) (+ (key entry :lines) line-count))
 
   (set total-files (+ total-files 1))
   (set total-lines (+ total-lines line-count)))
 
-(def (count-file file)
+(const (count-file file)
   (cond
     (ignored-file? file)
       nil
 
     :else
       (do
-        (def [text err] (fs/read-file file))
+        (const [text err] (fs/read-file file))
 
         (if err
           nil
           (record-file file (count-text text))))))
 
-(def (pad-left value width)
+
+(const (pad-left value width)
   (def text (str value))
 
   (while (< (len text) width)
@@ -109,7 +107,7 @@
 
   text)
 
-(def (pad-right value width)
+(const (pad-right value width)
   (def text (str value))
 
   (while (< (len text) width)
@@ -117,44 +115,49 @@
 
   text)
 
-(def (walk dir)
-  (def [names err] (fs/list-dir dir))
+
+(const (walk dir)
+  (const [names err] (fs/list-dir dir))
 
   (cond
     err
       (print "skip:" dir err)
 
     :else
-      (do (def i 0)
-          (while (< i (len names))
+      (do
+        (def i 0)
 
-            (def name (idx names i))
-            (def full (path/join dir name))
+        (while (< i (len names))
+          (const
+            name (idx names i)
+            full (path/join dir name))
 
-            (cond
-              (fs/dir? full)
-                (if (not (ignored-dir? name))
-                  (walk full))
+          (cond
+            (fs/dir? full)
+              (if (not (ignored-dir? name))
+                (walk full))
 
-              (fs/file? full)
-                (count-file full))
+            (fs/file? full)
+              (count-file full))
 
-            (set i (+ i 1))))))
+          (set i (+ i 1))))))
 
-(def (print-stats)
+(const (print-stats)
   (print "gloc:" root)
 
-  (def exts (keys stats))
-  (def files-width (len "files"))
-  (def ext-width (len "ext"))
-  (def lines-width (len "loc"))
-  (def i 0)
+  (const exts (keys stats))
+  (def
+    files-width (len "files")
+    ext-width   (len "ext")
+    lines-width (len "lines"))
 
+  (def i 0)
   (while (< i (len exts))
-    (def ext (idx exts i))
-    (def entry (key stats ext))
-    (def files-text (str (key entry :files)))
-    (def lines-text (str (key entry :lines)))
+    (const
+      ext        (idx exts i)
+      entry      (key stats ext)
+      files-text (str (key entry :files))
+      lines-text (str (key entry :lines)))
 
     (if (> (len files-text) files-width)
       (set files-width (len files-text)))
@@ -175,27 +178,31 @@
   (set i 0)
 
   (while (< i (len exts))
-    (def ext (idx exts i))
-    (def entry (key stats ext))
+    (const
+      ext   (idx exts i)
+      entry (key stats ext))
 
-    (write (pad-left (key entry :files) files-width) "  "
-           (pad-right ext ext-width) "  "
-           (pad-left (key entry :lines) lines-width) "\n")
+    (write
+      (pad-left (key entry :files) files-width) "  "
+      (pad-right ext ext-width) "  "
+      (pad-left (key entry :lines) lines-width) "\n")
 
     (set i (+ i 1)))
 
-  (print)(print "total" total-files "files" total-lines "lines"))
+  (print)
+  (print "total" total-files "files" total-lines "lines"))
 
 
 (cond
-  (fs/dir? root)      ;if dir?
+  (fs/dir? root)
     (walk root)
 
-  (fs/file? root)     ; else if file?
+  (fs/file? root)
     (count-file root)
 
   :else
-    (do (print "path not found:" root)
-        (os/exit 1)))
+    (do
+      (print "path not found:" root)
+      (os/exit 1)))
 
 (print-stats)
