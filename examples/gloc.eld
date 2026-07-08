@@ -26,20 +26,26 @@
 
 
 (def (ignored-dir? name)
-  (or (= name ".git")
-      (= name "_work")
-      (= name "_bench")))
+  (case name
+    ".git"   true
+    "_work"  true
+    "_bench" true
+    false))
 
 (def (ignored-file? file)
   (def
     name (path/base file)
     ext  (path/ext file))
 
-  (or (= name ".gitignore")
-      (= name ".gitattributes")
-      (= ext ".zip")
-      (= ext ".md")
-      (= ext ".exe")))
+  (or (case name
+        ".gitignore"     true
+        ".gitattributes" true
+        false)
+      (case ext
+        ".zip" true
+        ".md"  true
+        ".exe" true
+        false)))
 
 (def (comment-line? line)
   (def trimmed (str/trim line))
@@ -53,8 +59,8 @@
 (def (file-ext file)
   (def ext (path/ext file))
 
-  (if (= ext "")
-    "(none)"
+  (case ext
+    "" "(none)"
     ext))
 
 (def (count-text text)
@@ -172,7 +178,7 @@
 
   (write
     (pad-left "files" files-width) "  "
-    (pad-right "ext" ext-width) "  "
+    (pad-right "ext" ext-width)    "  "
     (pad-left "lines" lines-width) "\n")
 
   (set i 0)
@@ -184,7 +190,7 @@
 
     (write
       (pad-left (key entry :files) files-width) "  "
-      (pad-right ext ext-width) "  "
+      (pad-right ext ext-width)                 "  "
       (pad-left (key entry :lines) lines-width) "\n")
 
     (set i (+ i 1)))

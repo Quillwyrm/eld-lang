@@ -2028,6 +2028,7 @@ symbol_is_reserved_word :: proc(symbol: ^SymbolObject) -> bool {
 	       symbol.text == "do" ||
 	       symbol.text == "if" ||
 	       symbol.text == "cond" ||
+	       symbol.text == "case" ||
 	       symbol.text == "while" ||
 	       symbol.text == "and" ||
 	       symbol.text == "or" ||
@@ -3075,6 +3076,79 @@ compile_cond :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	}
 }
 
+compile_case :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
+	if len(list.items) < 2 {
+		compile_error("`case` expects a subject")
+		return
+	}
+
+	slot_mark := builder.next_slot
+	subject_slot := claim_slot(builder)
+	if Compiler.failed { return }
+	label_slot := claim_slot(builder)
+	if Compiler.failed { return }
+	match_slot := claim_slot(builder)
+	if Compiler.failed { return }
+
+	compile_expr(builder, list.items[1], subject_slot)
+	if Compiler.failed { return }
+
+	end_jumps := make([dynamic]int)
+	defer delete(end_jumps)
+
+	remaining_count := len(list.items) - 2
+	has_default := remaining_count % 2 != 0
+	pair_end := len(list.items)
+	if has_default {
+		pair_end -= 1
+	}
+
+	for i := 2; i < pair_end; i += 2 {
+		label, label_is_literal := constant_from_form(list.items[i])
+		if !label_is_literal {
+			compile_error("`case` label must be a literal")
+			return
+		}
+
+		for j := 2; j < i; j += 2 {
+			previous_label, _ := constant_from_form(list.items[j])
+			if values_equal(previous_label, label) {
+				compile_error("duplicate `case` label")
+				return
+			}
+		}
+
+		compile_expr(builder, list.items[i], label_slot)
+		if Compiler.failed { return }
+
+		emit_equal(builder, match_slot, subject_slot, label_slot)
+
+		next_jump := len(builder.bytecode)
+		emit_jump_if_falsey(builder, match_slot, 0)
+
+		compile_expr(builder, list.items[i + 1], dst)
+		if Compiler.failed { return }
+
+		append(&end_jumps, len(builder.bytecode))
+		emit_jump(builder, 0)
+
+		patch_jump_target(builder, next_jump, len(builder.bytecode))
+	}
+
+	if has_default {
+		compile_expr(builder, list.items[len(list.items) - 1], dst)
+		if Compiler.failed { return }
+	} else {
+		emit_load_nil(builder, dst)
+	}
+
+	for jump in end_jumps {
+		patch_jump_target(builder, jump, len(builder.bytecode))
+	}
+
+	builder.next_slot = slot_mark
+}
+
 compile_and :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if len(list.items) == 1 {
 		emit_load_true(builder, dst)
@@ -3732,6 +3806,10 @@ compile_list_expr :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	}
 	if head.text == "cond" {
 		compile_cond(builder, list, dst)
+		return
+	}
+	if head.text == "case" {
+		compile_case(builder, list, dst)
 		return
 	}
 	if head.text == "while" {
