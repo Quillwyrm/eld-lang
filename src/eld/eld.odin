@@ -266,9 +266,15 @@ LocalBinding :: struct {
 	mutable: bool,
 }
 
+ConstCacheEntry :: struct {
+	hash:  u64,
+	index: int,
+}
+
 CodeBuilder :: struct {
 	bytecode:    [dynamic]u32,
 	constants:   [dynamic]Value,
+	const_cache: [dynamic]ConstCacheEntry,
 	child_codes: [dynamic]^Code,
 
 	frame_slot_count: int,
@@ -1571,6 +1577,7 @@ begin_code :: proc(parent: ^CodeBuilder, param_count: int, source_name: string) 
 	return CodeBuilder{
 		bytecode    = make([dynamic]u32),
 		constants   = make([dynamic]Value),
+		const_cache = make([dynamic]ConstCacheEntry),
 		child_codes = make([dynamic]^Code),
 
 		frame_slot_count = param_count,
@@ -1610,6 +1617,7 @@ end_code :: proc(builder: ^CodeBuilder) -> ^Code {
 
 	delete(builder.bytecode)
 	delete(builder.constants)
+	delete(builder.const_cache)
 	delete(builder.child_codes)
 	delete(builder.upvalue_descs)
 	delete(builder.upvalue_symbols)
@@ -1649,6 +1657,7 @@ delete_code_builder :: proc(builder: ^CodeBuilder) {
 
 	delete(builder.bytecode)
 	delete(builder.constants)
+	delete(builder.const_cache)
 	delete(builder.child_codes)
 	delete(builder.upvalue_descs)
 	delete(builder.upvalue_symbols)
@@ -1659,9 +1668,150 @@ delete_code_builder :: proc(builder: ^CodeBuilder) {
 
 // Constants ======================================================================================
 
-const_value :: proc(builder: ^CodeBuilder, value: Value) -> int {
-	append(&builder.constants, value)
-	return len(builder.constants) - 1
+CONST_CACHE_MIN_BUCKETS :: 32
+
+// Hashes place constants into the compiler cache. Hash collisions only add probing;
+// intern_constant still checks compiler constant identity before reusing an index.
+constant_hash :: proc(value: Value) -> u64 {
+	if value == nil {
+		bits := u64(0)
+		return hash.fnv64a(mem.ptr_to_bytes(&bits))
+	}
+
+	switch v in value {
+	case bool:
+		bits := u64(1) if v else u64(0)
+		return hash.fnv64a(mem.ptr_to_bytes(&bits))
+
+	case i64:
+		bits := transmute(u64)v
+		return hash.fnv64a(mem.ptr_to_bytes(&bits))
+
+	case f64:
+		bits := transmute(u64)v
+		return hash.fnv64a(mem.ptr_to_bytes(&bits))
+
+	case ^Object:
+		if v.kind == .STRING {
+			return string_hash(cast(^StringObject)v)
+		}
+
+		bits := u64(uintptr(v))
+		return hash.fnv64a(mem.ptr_to_bytes(&bits))
+	}
+
+	assert(false, "invalid constant value")
+	return 0
+}
+
+// Open-addressed cache for the current builder only. Finished Code keeps constants, not this index.
+rebuild_const_cache :: proc(builder: ^CodeBuilder, bucket_count: int) {
+	old_cache := builder.const_cache
+	builder.const_cache = make([dynamic]ConstCacheEntry, bucket_count)
+
+	for i := 0; i < len(builder.const_cache); i += 1 {
+		builder.const_cache[i].index = -1
+	}
+
+	for constant, constant_index in builder.constants {
+		hash_value := constant_hash(constant)
+		slot := int(hash_value % u64(len(builder.const_cache)))
+
+		for builder.const_cache[slot].index >= 0 {
+			slot = (slot + 1) % len(builder.const_cache)
+		}
+
+		builder.const_cache[slot] = ConstCacheEntry{
+			hash  = hash_value,
+			index = constant_index,
+		}
+	}
+
+	delete(old_cache)
+}
+
+intern_constant :: proc(builder: ^CodeBuilder, value: Value) -> int {
+	if len(builder.const_cache) == 0 {
+		rebuild_const_cache(builder, CONST_CACHE_MIN_BUCKETS)
+	}
+
+	if (len(builder.constants) + 1) * 4 >= len(builder.const_cache) * 3 {
+		rebuild_const_cache(builder, len(builder.const_cache) * 2)
+	}
+
+	hash_value := constant_hash(value)
+	slot := int(hash_value % u64(len(builder.const_cache)))
+
+	for {
+		entry := builder.const_cache[slot]
+		if entry.index < 0 {
+			if len(builder.constants) > int(max(u16)) {
+				compile_error("code uses too many constants.")
+				return 0
+			}
+
+			constant_index := len(builder.constants)
+			append(&builder.constants, value)
+			builder.const_cache[slot] = ConstCacheEntry{
+				hash  = hash_value,
+				index = constant_index,
+			}
+			return constant_index
+		}
+
+		if entry.hash == hash_value {
+			existing := builder.constants[entry.index]
+
+			// Constant identity preserves literal type and object identity.
+			// Do not use runtime `=`, which intentionally collapses some numeric values.
+			if existing == nil || value == nil {
+				if existing == nil && value == nil {
+					return entry.index
+				}
+			} else {
+				switch existing_value in existing {
+				case bool:
+					value_bool, value_is_bool := value.(bool)
+					if value_is_bool && existing_value == value_bool {
+						return entry.index
+					}
+
+				case i64:
+					value_int, value_is_int := value.(i64)
+					if value_is_int && existing_value == value_int {
+						return entry.index
+					}
+
+				case f64:
+					value_float, value_is_float := value.(f64)
+					if value_is_float {
+						existing_bits := transmute(u64)existing_value
+						value_bits := transmute(u64)value_float
+						if existing_bits == value_bits {
+							return entry.index
+						}
+					}
+
+				case ^Object:
+					value_object, value_is_object := value.(^Object)
+					if value_is_object && existing_value.kind == value_object.kind {
+						if existing_value.kind == .STRING {
+							existing_string := cast(^StringObject)existing_value
+							value_string := cast(^StringObject)value_object
+							if existing_string.text == value_string.text {
+								return entry.index
+							}
+						} else if existing_value == value_object {
+							return entry.index
+						}
+					}
+
+				}
+			}
+		}
+
+		slot = (slot + 1) % len(builder.const_cache)
+	}
 }
 
 
@@ -2100,12 +2250,8 @@ resolve_upvalue :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject) -> (int, b
 }
 
 compile_constant :: proc(builder: ^CodeBuilder, value: Value, dst: int) {
-	if len(builder.constants) > int(max(u16)) {
-		compile_error("code uses too many constants.")
-		return
-	}
-
-	constant_index := const_value(builder, value)
+	constant_index := intern_constant(builder, value)
+	if Compiler.failed { return }
 	emit_load_const(builder, dst, constant_index)
 }
 
@@ -2223,14 +2369,16 @@ compile_map_expr :: proc(builder: ^CodeBuilder, map_object: ^MapObject, dst: int
 	for entry in map_object.entries {
 		// Literal keys use MAP_SET_CONST; values still evaluate left-to-right before insertion.
 		key_value, key_is_literal := constant_from_form(entry.key)
-		if key_is_literal && len(builder.constants) <= int(max(u8)) {
-			constant_index := const_value(builder, key_value)
-
-			compile_expr(builder, entry.value, value_slot)
+		if key_is_literal {
+			constant_index := intern_constant(builder, key_value)
 			if Compiler.failed { return }
+			if constant_index <= int(max(u8)) {
+				compile_expr(builder, entry.value, value_slot)
+				if Compiler.failed { return }
 
-			emit_map_set_const(builder, dst, constant_index, value_slot)
-			continue
+				emit_map_set_const(builder, dst, constant_index, value_slot)
+				continue
+			}
 		}
 
 		compile_expr(builder, entry.key, key_slot)
@@ -2392,11 +2540,12 @@ compile_binding_target :: proc(builder: ^CodeBuilder, target: Value, source_slot
 			if Compiler.failed { return }
 
 			key, _ := constant_from_form(entry.key)
-			if len(builder.constants) <= int(max(u8)) {
-				constant_index := const_value(builder, key)
+			constant_index := intern_constant(builder, key)
+			if Compiler.failed { return }
+
+			if constant_index <= int(max(u8)) {
 				emit_map_get_const(builder, child_source_slot, source_slot, constant_index)
 			} else {
-				constant_index := const_value(builder, key)
 				// MAP_GET reads the key before replacing dst with the lookup result.
 				emit_load_const(builder, child_source_slot, constant_index)
 				emit_map_get(builder, child_source_slot, source_slot, child_source_slot)
@@ -3393,7 +3542,6 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 							_, builtin_found := find_builtin(Active_VM, head)
 							if builtin_found && !builtin_is_shadowed(builder, head) {
 								can_update := true
-								literal_count := 0
 
 								for i := 2; i < len(value_list.items); i += 1 {
 									operand := value_list.items[i]
@@ -3405,7 +3553,6 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 
 									_, operand_is_literal := constant_from_form(operand)
 									if operand_is_literal {
-										literal_count += 1
 										continue
 									}
 
@@ -3413,31 +3560,45 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 									break
 								}
 
-								if can_update && len(builder.constants) + literal_count <= int(max(u8)) + 1 {
-									lhs_slot := binding.slot
-
+								if can_update {
+									const_indexes_fit := true
 									for i := 2; i < len(value_list.items); i += 1 {
-										operand := value_list.items[i]
-										operand_constant, _ := constant_from_form(operand)
-										constant_index := const_value(builder, operand_constant)
+										operand_constant, _ := constant_from_form(value_list.items[i])
+										constant_index := intern_constant(builder, operand_constant)
+										if Compiler.failed { return }
+										if constant_index > int(max(u8)) {
+											const_indexes_fit = false
+											break
+										}
+									}
 
-										if head.text == "+" {
-											emit_add_const(builder, binding.slot, lhs_slot, constant_index)
-										} else if head.text == "-" {
-											emit_sub_const(builder, binding.slot, lhs_slot, constant_index)
-										} else if head.text == "*" {
-											emit_mul_const(builder, binding.slot, lhs_slot, constant_index)
-										} else {
-											emit_div_const(builder, binding.slot, lhs_slot, constant_index)
+									if const_indexes_fit {
+										lhs_slot := binding.slot
+
+										for i := 2; i < len(value_list.items); i += 1 {
+											operand := value_list.items[i]
+											operand_constant, _ := constant_from_form(operand)
+											constant_index := intern_constant(builder, operand_constant)
+											if Compiler.failed { return }
+
+											if head.text == "+" {
+												emit_add_const(builder, binding.slot, lhs_slot, constant_index)
+											} else if head.text == "-" {
+												emit_sub_const(builder, binding.slot, lhs_slot, constant_index)
+											} else if head.text == "*" {
+												emit_mul_const(builder, binding.slot, lhs_slot, constant_index)
+											} else {
+												emit_div_const(builder, binding.slot, lhs_slot, constant_index)
+											}
+
+											lhs_slot = binding.slot
 										}
 
-										lhs_slot = binding.slot
+										if keep_result {
+											emit_move(builder, dst, binding.slot)
+										}
+										return
 									}
-
-									if keep_result {
-										emit_move(builder, dst, binding.slot)
-									}
-									return
 								}
 							}
 						}
@@ -3522,18 +3683,20 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 		}
 
 		index_value, index_is_literal := constant_from_form(target_list.items[2])
-		if index_is_literal && len(builder.constants) <= int(max(u8)) {
-			constant_index := const_value(builder, index_value)
-
-			compile_expr(builder, value, dst)
+		if index_is_literal {
+			constant_index := intern_constant(builder, index_value)
 			if Compiler.failed { return }
+			if constant_index <= int(max(u8)) {
+				compile_expr(builder, value, dst)
+				if Compiler.failed { return }
 
-			if head.text == "idx" {
-				emit_vector_set_const(builder, receiver_slot, constant_index, dst)
-			} else {
-				emit_map_set_const(builder, receiver_slot, constant_index, dst)
+				if head.text == "idx" {
+					emit_vector_set_const(builder, receiver_slot, constant_index, dst)
+				} else {
+					emit_map_set_const(builder, receiver_slot, constant_index, dst)
+				}
+				return
 			}
-			return
 		}
 
 		index_slot, index_is_local := local_symbol_slot(builder, target_list.items[2])
@@ -3597,8 +3760,18 @@ compile_builtin_fast_path :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, 
 			return
 		}
 
-		if operand_count == 2 && len(builder.constants) <= int(max(u8)) {
+		if operand_count == 2 {
 			rhs_constant, rhs_is_constant := constant_from_form(args[1])
+			constant_index := -1
+			if rhs_is_constant {
+				constant_index = intern_constant(builder, rhs_constant)
+				if Compiler.failed { return }
+
+				if constant_index > int(max(u8)) {
+					rhs_is_constant = false
+				}
+			}
+
 			if rhs_is_constant {
 				lhs_slot, lhs_is_local := local_symbol_slot(builder, args[0])
 				if !lhs_is_local {
@@ -3608,8 +3781,6 @@ compile_builtin_fast_path :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, 
 					compile_expr(builder, args[0], lhs_slot)
 					if Compiler.failed { return }
 				}
-
-				constant_index := const_value(builder, rhs_constant)
 
 				if symbol.text == "+" {
 					emit_add_const(builder, dst, lhs_slot, constant_index)
@@ -3661,12 +3832,15 @@ compile_builtin_fast_path :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, 
 			if Compiler.failed { return }
 		}
 
-		if symbol.text == "%" && len(builder.constants) <= int(max(u8)) {
+		if symbol.text == "%" {
 			rhs_constant, rhs_is_constant := constant_from_form(args[1])
 			if rhs_is_constant {
-				constant_index := const_value(builder, rhs_constant)
-				emit_mod_const(builder, dst, lhs_slot, constant_index)
-				return
+				constant_index := intern_constant(builder, rhs_constant)
+				if Compiler.failed { return }
+				if constant_index <= int(max(u8)) {
+					emit_mod_const(builder, dst, lhs_slot, constant_index)
+					return
+				}
 			}
 		}
 
@@ -3924,14 +4098,17 @@ compile_list_expr :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 		}
 
 		key_value, key_is_literal := constant_from_form(list.items[2])
-		if key_is_literal && len(builder.constants) <= int(max(u8)) {
-			constant_index := const_value(builder, key_value)
-			if head.text == "idx" {
-				emit_vector_get_const(builder, dst, receiver_slot, constant_index)
-			} else {
-				emit_map_get_const(builder, dst, receiver_slot, constant_index)
+		if key_is_literal {
+			constant_index := intern_constant(builder, key_value)
+			if Compiler.failed { return }
+			if constant_index <= int(max(u8)) {
+				if head.text == "idx" {
+					emit_vector_get_const(builder, dst, receiver_slot, constant_index)
+				} else {
+					emit_map_get_const(builder, dst, receiver_slot, constant_index)
+				}
+				return
 			}
-			return
 		}
 
 		key_slot, key_is_local := local_symbol_slot(builder, list.items[2])
