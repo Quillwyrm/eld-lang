@@ -160,10 +160,11 @@
   (var i 0)
   (while (< i (len exts))
     (def
-      ext        (idx exts i)
-      entry      (key stats ext)
-      files-text (str (key entry :files))
-      lines-text (str (key entry :lines)))
+      ext (idx exts i)
+      {:files files
+       :lines lines} (key stats ext)
+      files-text (str files)
+      lines-text (str lines))
 
     (if (> (len files-text) files-width)
       (set files-width (len files-text)))
@@ -185,13 +186,14 @@
 
   (while (< i (len exts))
     (def
-      ext   (idx exts i)
-      entry (key stats ext))
+      ext (idx exts i)
+      {:files files
+       :lines lines} (key stats ext))
 
     (write
-      (pad-left (key entry :files) files-width) "  "
-      (pad-right ext ext-width)                 "  "
-      (pad-left (key entry :lines) lines-width) "\n")
+      (pad-left files files-width) "  "
+      (pad-right ext ext-width)    "  "
+      (pad-left lines lines-width) "\n")
 
     (set i (+ i 1)))
 

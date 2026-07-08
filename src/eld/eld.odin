@@ -436,7 +436,7 @@ string_hash :: proc(object: ^StringObject) -> u64 {
 // mixed comparison rule by first converting ints to f64.
 map_key_hash :: proc(key: Value) -> (u64, bool) {
 	if key == nil {
-		runtime_error("map key cannot be nil")
+		runtime_error("map key cannot be nil.")
 		return 0, false
 	}
 
@@ -452,7 +452,7 @@ map_key_hash :: proc(key: Value) -> (u64, bool) {
 
 	case f64:
 		if value != value {
-			runtime_error("map key cannot be NaN")
+			runtime_error("map key cannot be NaN.")
 			return 0, false
 		}
 
@@ -795,7 +795,7 @@ skip_trivia :: proc() {
 
 number_from_text :: proc(text: string, report_reader_errors: bool) -> (Value, bool) {
 	if len(text) == 0 {
-		if report_reader_errors { reader_error("invalid number literal") }
+		if report_reader_errors { reader_error("invalid number literal.") }
 		return Value{}, false
 	}
 
@@ -826,7 +826,7 @@ number_from_text :: proc(text: string, report_reader_errors: bool) -> (Value, bo
 
 	// Valid numbers contain a digit and consume the entire text.
 	if digit_count == 0 || number_index != len(text) {
-		if report_reader_errors { reader_error("invalid number literal") }
+		if report_reader_errors { reader_error("invalid number literal.") }
 		return Value{}, false
 	}
 
@@ -834,7 +834,7 @@ number_from_text :: proc(text: string, report_reader_errors: bool) -> (Value, bo
 	if is_float {
 		float_value, float_ok := strconv.parse_f64(text)
 		if !float_ok {
-			if report_reader_errors { reader_error("float literal out of range") }
+			if report_reader_errors { reader_error("float literal out of range.") }
 			return Value{}, false
 		}
 
@@ -854,7 +854,7 @@ number_from_text :: proc(text: string, report_reader_errors: bool) -> (Value, bo
 		digit := u64(text[digit_index] - '0')
 
 		if magnitude > (magnitude_limit - digit) / 10 {
-			if report_reader_errors { reader_error("integer literal out of range") }
+			if report_reader_errors { reader_error("integer literal out of range.") }
 			return Value{}, false
 		}
 
@@ -914,7 +914,7 @@ read_string :: proc() -> Value {
 			if has_escapes {
 				delete(decoded)
 			}
-			reader_error("unterminated string")
+			reader_error("unterminated string.")
 			return Value{}
 		}
 
@@ -932,7 +932,7 @@ read_string :: proc() -> Value {
 
 			if Reader.index >= len(Reader.source) {
 				delete(decoded)
-				reader_error("unterminated string")
+				reader_error("unterminated string.")
 				return Value{}
 			}
 
@@ -941,7 +941,7 @@ read_string :: proc() -> Value {
 
 			if escaped == '\n' || escaped == '\r' {
 				delete(decoded)
-				reader_error("unterminated string")
+				reader_error("unterminated string.")
 				return Value{}
 			}
 
@@ -958,7 +958,7 @@ read_string :: proc() -> Value {
 				append(&decoded, '"')
 			case:
 				delete(decoded)
-				reader_error(fmt.tprintf("invalid escape sequence '\\%c'", escaped))
+				reader_error(fmt.tprintf("invalid escape sequence '\\%c'.", escaped))
 				return Value{}
 			}
 
@@ -990,7 +990,7 @@ read_string :: proc() -> Value {
 		delete(decoded)
 	}
 
-	reader_error("unterminated string")
+	reader_error("unterminated string.")
 	return Value{}
 }
 
@@ -1003,7 +1003,7 @@ read_name_string :: proc() -> Value {
 	}
 
 	if Reader.index == start {
-		reader_error("name string requires a name")
+		reader_error("colon string literal requires text after `:`.")
 		return Value{}
 	}
 
@@ -1020,7 +1020,7 @@ read_list :: proc() -> Value {
 		skip_trivia()
 
 		if Reader.index >= len(Reader.source) {
-			reader_error("unterminated list")
+			reader_error("unterminated list.")
 			delete(items)
 			return Value{}
 		}
@@ -1050,7 +1050,7 @@ read_vector :: proc() -> Value {
 		skip_trivia()
 
 		if Reader.index >= len(Reader.source) {
-			reader_error("unterminated vector")
+			reader_error("unterminated vector.")
 			delete(items)
 			return Value{}
 		}
@@ -1080,7 +1080,7 @@ read_map :: proc() -> Value {
 		skip_trivia()
 
 		if Reader.index >= len(Reader.source) {
-			reader_error("unterminated map")
+			reader_error("unterminated map.")
 			delete(entries)
 			return Value{}
 		}
@@ -1100,12 +1100,12 @@ read_map :: proc() -> Value {
 
 		skip_trivia()
 		if Reader.index >= len(Reader.source) {
-			reader_error("unterminated map")
+			reader_error("unterminated map.")
 			delete(entries)
 			return Value{}
 		}
 		if Reader.source[Reader.index] == '}' {
-			reader_error("map literal expects key/value pairs")
+			reader_error("map literal expects key/value pairs.")
 			delete(entries)
 			return Value{}
 		}
@@ -1132,7 +1132,7 @@ read_form :: proc() -> Value {
 		return read_list()
 
 	case ')':
-		reader_error("unexpected ')'")
+		reader_error("unexpected `)`.")
 		return Value{}
 
 	case '"':
@@ -1142,21 +1142,21 @@ read_form :: proc() -> Value {
 		return read_name_string()
 
 	case '\'':
-		reader_error("quote not implemented")
+		reader_error("quote is not implemented.")
 		return Value{}
 
 	case '[':
 		return read_vector()
 
 	case ']':
-		reader_error("unexpected ']'")
+		reader_error("unexpected `]`.")
 		return Value{}
 
 	case '{':
 		return read_map()
 
 	case '}':
-		reader_error("unexpected '}'")
+		reader_error("unexpected `}`.")
 		return Value{}
 
 	case:
@@ -1466,7 +1466,7 @@ resolve_import_path :: proc(importer_source_name, import_path: string) -> (strin
 
 		joined, join_error := filepath.join({importer_dir, path}, context.allocator)
 		if join_error != nil {
-			compile_error(fmt.tprintf("could not resolve import path `%s`", import_path))
+			compile_error(fmt.tprintf("could not resolve import path `%s`.", import_path))
 			return "", false
 		}
 		joined_path = joined
@@ -1478,7 +1478,7 @@ resolve_import_path :: proc(importer_source_name, import_path: string) -> (strin
 		delete(joined_path)
 	}
 	if resolve_error != nil {
-		compile_error(fmt.tprintf("could not resolve import path `%s`", import_path))
+		compile_error(fmt.tprintf("could not resolve import path `%s`.", import_path))
 		return "", false
 	}
 
@@ -1494,7 +1494,7 @@ load_module :: proc(importer_source_name, import_path: string) -> ^Module {
 	existing_index, found := find_module(vm, id)
 	if found {
 		if vm.modules[existing_index].loading {
-			compile_error(fmt.tprintf("cyclic import `%s`", import_path))
+			compile_error(fmt.tprintf("cyclic import `%s`.", import_path))
 			delete(id)
 			return nil
 		}
@@ -1511,7 +1511,7 @@ load_module :: proc(importer_source_name, import_path: string) -> ^Module {
 			return &vm.modules[host_index]
 		}
 
-		compile_error(fmt.tprintf("module `%s` not found", import_path))
+		compile_error(fmt.tprintf("module `%s` not found.", import_path))
 		return nil
 	}
 
@@ -1525,7 +1525,7 @@ load_module :: proc(importer_source_name, import_path: string) -> ^Module {
 
 	source_bytes, read_error := os.read_entire_file(id, context.allocator)
 	if read_error != nil {
-		compile_error(fmt.tprintf("could not read module `%s`", import_path))
+		compile_error(fmt.tprintf("could not read module `%s`.", import_path))
 		return nil
 	}
 	defer delete(source_bytes)
@@ -2000,7 +2000,7 @@ patch_jump_target :: proc(builder: ^CodeBuilder, jump_index, target_index: int) 
 // Claims one frame slot above every value and binding that is currently live.
 claim_slot :: proc(builder: ^CodeBuilder) -> int {
 	if builder.next_slot >= MAX_FRAME_SLOTS {
-		compile_error("code uses too many frame slots")
+		compile_error("body uses too many local bindings or temporary values.")
 		return 0
 	}
 
@@ -2012,7 +2012,7 @@ claim_slot :: proc(builder: ^CodeBuilder) -> int {
 // Reserves a contiguous slot range ending immediately before slot_after_last.
 reserve_slots_until :: proc(builder: ^CodeBuilder, slot_after_last: int) {
 	if slot_after_last > MAX_FRAME_SLOTS {
-		compile_error("code uses too many frame slots")
+		compile_error("body uses too many local bindings or temporary values.")
 		return
 	}
 
@@ -2101,7 +2101,7 @@ resolve_upvalue :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject) -> (int, b
 
 compile_constant :: proc(builder: ^CodeBuilder, value: Value, dst: int) {
 	if len(builder.constants) > int(max(u16)) {
-		compile_error("code uses too many constants")
+		compile_error("code uses too many constants.")
 		return
 	}
 
@@ -2168,7 +2168,7 @@ compile_symbol_expr :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, dst: i
 	builtin_index, builtin_found := find_builtin(Active_VM, symbol)
 	if builtin_found {
 		if builtin_index > int(max(u16)) {
-			compile_error("builtin binding index does not fit bytecode")
+			compile_error("internal compiler limit exceeded for built-in bindings.")
 			return
 		}
 
@@ -2176,7 +2176,7 @@ compile_symbol_expr :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, dst: i
 		return
 	}
 
-	compile_error(fmt.tprintf("undefined name `%s`", symbol.text))
+	compile_error(fmt.tprintf("symbol `%s` has no visible binding.", symbol.text))
 }
 
 compile_vector_expr :: proc(builder: ^CodeBuilder, vector: ^VectorObject, dst: int) {
@@ -2243,51 +2243,215 @@ compile_map_expr :: proc(builder: ^CodeBuilder, map_object: ^MapObject, dst: int
 	}
 }
 
+// Validates one recursive def/var target before RHS compilation.
+// This keeps target names invisible while the RHS compiles.
+validate_binding_target :: proc(builder: ^CodeBuilder, target: Value, introduced_symbols: []^SymbolObject, introduced_symbol_count: ^int) {
+	target_object, target_is_object := target.(^Object)
+	if !target_is_object {
+		compile_error("binding target must be a symbol, vector pattern, or map pattern.")
+		return
+	}
+
+	switch target_object.kind {
+	case .SYMBOL:
+		name := cast(^SymbolObject)target_object
+		if symbol_is_reserved_word(name) {
+			compile_error(fmt.tprintf("cannot define reserved symbol `%s`.", name.text))
+			return
+		}
+
+		for i := 0; i < introduced_symbol_count^; i += 1 {
+			if introduced_symbols[i] == name {
+				compile_error(fmt.tprintf("duplicate binding for symbol `%s` in binding target.", name.text))
+				return
+			}
+		}
+
+		for i := builder.current_scope_local_start; i < builder.local_count; i += 1 {
+			if builder.local_bindings[i].symbol == name {
+				compile_error(fmt.tprintf("duplicate binding for symbol `%s` in this scope.", name.text))
+				return
+			}
+		}
+
+		if introduced_symbol_count^ >= len(introduced_symbols) {
+			compile_error("binding target introduces too many bindings.")
+			return
+		}
+
+		introduced_symbols[introduced_symbol_count^] = name
+		introduced_symbol_count^ = introduced_symbol_count^ + 1
+
+	case .VECTOR:
+		pattern := cast(^VectorObject)target_object
+		count := len(pattern.items)
+		if count == 0 {
+			compile_error("vector pattern cannot be empty.")
+			return
+		}
+
+		if count > int(max(u8)) {
+			compile_error("vector pattern supports at most 255 items.")
+			return
+		}
+
+		for item in pattern.items {
+			validate_binding_target(builder, item, introduced_symbols, introduced_symbol_count)
+			if Compiler.failed { return }
+		}
+
+	case .MAP:
+		pattern := cast(^MapObject)target_object
+		count := len(pattern.entries)
+		if count == 0 {
+			compile_error("map pattern cannot be empty.")
+			return
+		}
+
+		for i := 0; i < count; i += 1 {
+			entry := pattern.entries[i]
+			key, key_is_literal := constant_from_form(entry.key)
+			if !key_is_literal {
+				compile_error("map pattern key must be a literal value.")
+				return
+			}
+
+			if key == nil {
+				compile_error("map pattern key cannot be nil.")
+				return
+			}
+
+			float_key, key_is_float := key.(f64)
+			if key_is_float && float_key != float_key {
+				compile_error("map pattern key cannot be NaN.")
+				return
+			}
+
+			for j := 0; j < i; j += 1 {
+				previous_key, _ := constant_from_form(pattern.entries[j].key)
+				if values_equal(previous_key, key) {
+					compile_error("duplicate key in map pattern.")
+					return
+				}
+			}
+
+			validate_binding_target(builder, entry.value, introduced_symbols, introduced_symbol_count)
+			if Compiler.failed { return }
+		}
+
+	case .STRING, .LIST, .NATIVE_FUNCTION, .FUNCTION:
+		compile_error("binding target must be a symbol, vector pattern, or map pattern.")
+		return
+	}
+}
+
+// Emits unpacking for a previously validated binding target.
+// Target forms evaluate no user expressions; map keys are compile-time values.
+compile_binding_target :: proc(builder: ^CodeBuilder, target: Value, source_slot: int, mutable: bool) {
+	target_object, _ := target.(^Object)
+
+	switch target_object.kind {
+	case .SYMBOL:
+		binding := LocalBinding{
+			symbol  = cast(^SymbolObject)target_object,
+			slot    = source_slot,
+			mutable = mutable,
+		}
+
+		builder.local_bindings[builder.local_count] = binding
+		builder.local_count += 1
+
+		if builder.parent == nil {
+			append(&builder.file_bindings, binding)
+		}
+
+	case .VECTOR:
+		pattern := cast(^VectorObject)target_object
+		count := len(pattern.items)
+
+		// Use a fresh item range so nested vector patterns cannot clobber sibling item slots.
+		first_item_slot := claim_slot(builder)
+		if Compiler.failed { return }
+
+		reserve_slots_until(builder, first_item_slot + count)
+		if Compiler.failed { return }
+
+		emit_unpack_vector(builder, source_slot, first_item_slot, count)
+
+		for i := 0; i < count; i += 1 {
+			compile_binding_target(builder, pattern.items[i], first_item_slot + i, mutable)
+			if Compiler.failed { return }
+		}
+
+	case .MAP:
+		pattern := cast(^MapObject)target_object
+
+		// Keep source_slot live for every key lookup in this map pattern.
+		for entry in pattern.entries {
+			child_source_slot := claim_slot(builder)
+			if Compiler.failed { return }
+
+			key, _ := constant_from_form(entry.key)
+			if len(builder.constants) <= int(max(u8)) {
+				constant_index := const_value(builder, key)
+				emit_map_get_const(builder, child_source_slot, source_slot, constant_index)
+			} else {
+				constant_index := const_value(builder, key)
+				// MAP_GET reads the key before replacing dst with the lookup result.
+				emit_load_const(builder, child_source_slot, constant_index)
+				emit_map_get(builder, child_source_slot, source_slot, child_source_slot)
+			}
+
+			compile_binding_target(builder, entry.value, child_source_slot, mutable)
+			if Compiler.failed { return }
+		}
+
+	case .STRING, .LIST, .NATIVE_FUNCTION, .FUNCTION:
+		compile_error("binding target must be a symbol, vector pattern, or map pattern.")
+		return
+	}
+}
+
 compile_def_or_var :: proc(builder: ^CodeBuilder, form: Value, mutable: bool) {
 	form_name := "var" if mutable else "def"
 
 	object, _ := form.(^Object)
 	list := cast(^ListObject)object
 	if len(list.items) < 2 {
-		compile_error(fmt.tprintf("`%s` expects a binding", form_name))
+		compile_error(fmt.tprintf("`%s` expects a binding target.", form_name))
 		return
 	}
 
 	first_object, first_is_object := list.items[1].(^Object)
-	if !first_is_object {
-		compile_error(fmt.tprintf("`%s` binding target must be a name, function signature, or vector destructuring pattern", form_name))
-		return
-	}
-
-	if first_object.kind == .LIST {
+	if first_is_object && first_object.kind == .LIST {
 		signature := cast(^ListObject)first_object
 		if len(signature.items) == 0 {
-			compile_error(fmt.tprintf("function `%s` signature must start with a name", form_name))
+			compile_error(fmt.tprintf("`%s` function signature must start with a symbol.", form_name))
 			return
 		}
 
 		name_object, name_is_object := signature.items[0].(^Object)
 		if !name_is_object || name_object.kind != .SYMBOL {
-			compile_error(fmt.tprintf("function `%s` name must be a name", form_name))
+			compile_error(fmt.tprintf("`%s` function binding target must be a symbol.", form_name))
 			return
 		}
 
 		name := cast(^SymbolObject)name_object
 		if symbol_is_reserved_word(name) {
-			compile_error(fmt.tprintf("cannot define reserved name `%s`", name.text))
+			compile_error(fmt.tprintf("cannot define reserved symbol `%s`.", name.text))
 			return
 		}
 
 		for i := builder.current_scope_local_start; i < builder.local_count; i += 1 {
 			if builder.local_bindings[i].symbol == name {
-				compile_error(fmt.tprintf("duplicate definition `%s` in the same scope", name.text))
+				compile_error(fmt.tprintf("duplicate binding for symbol `%s` in this scope.", name.text))
 				return
 			}
 		}
 
 		param_count := len(signature.items) - 1
 		if param_count > int(max(u8)) {
-			compile_error("function has too many parameters")
+			compile_error("function has too many parameters.")
 			return
 		}
 
@@ -2296,18 +2460,18 @@ compile_def_or_var :: proc(builder: ^CodeBuilder, form: Value, mutable: bool) {
 
 			param_object, param_is_object := param_value.(^Object)
 			if !param_is_object || param_object.kind != .SYMBOL {
-				compile_error("function parameter must be a name")
+				compile_error("function parameter must be a symbol.")
 				return
 			}
 
 			param := cast(^SymbolObject)param_object
 			if symbol_is_reserved_word(param) {
-				compile_error(fmt.tprintf("cannot use reserved name `%s` as parameter", param.text))
+				compile_error(fmt.tprintf("cannot use reserved symbol `%s` as parameter.", param.text))
 				return
 			}
 
 			if param == name {
-				compile_error(fmt.tprintf("parameter `%s` duplicates function name", param.text))
+				compile_error(fmt.tprintf("parameter `%s` duplicates the function binding symbol.", param.text))
 				return
 			}
 
@@ -2315,7 +2479,7 @@ compile_def_or_var :: proc(builder: ^CodeBuilder, form: Value, mutable: bool) {
 				previous_object, _ := signature.items[j + 1].(^Object)
 				previous := cast(^SymbolObject)previous_object
 				if previous == param {
-					compile_error(fmt.tprintf("duplicate parameter `%s`", param.text))
+					compile_error(fmt.tprintf("duplicate parameter `%s`.", param.text))
 					return
 				}
 			}
@@ -2369,7 +2533,7 @@ compile_def_or_var :: proc(builder: ^CodeBuilder, form: Value, mutable: bool) {
 		child_code := end_code(&child)
 
 		if len(builder.child_codes) > int(max(u16)) {
-			compile_error("too many function literals in one body")
+			compile_error("body contains too many function literals.")
 			delete_code(child_code)
 			return
 		}
@@ -2382,7 +2546,7 @@ compile_def_or_var :: proc(builder: ^CodeBuilder, form: Value, mutable: bool) {
 	}
 
 	if (len(list.items) - 1) % 2 != 0 {
-		compile_error(fmt.tprintf("`%s` expects target/expression pairs", form_name))
+		compile_error(fmt.tprintf("`%s` expects binding target/expression pairs.\nusage: (%s target expr target expr ...)", form_name, form_name))
 		return
 	}
 
@@ -2390,126 +2554,21 @@ compile_def_or_var :: proc(builder: ^CodeBuilder, form: Value, mutable: bool) {
 		target := list.items[pair_index]
 		expression := list.items[pair_index + 1]
 
-		target_object, target_is_object := target.(^Object)
-		if !target_is_object {
-			compile_error(fmt.tprintf("`%s` binding target must be a name or vector destructuring pattern", form_name))
-			return
-		}
+		introduced_symbols: [MAX_FRAME_SLOTS]^SymbolObject
+		introduced_symbol_count := 0
 
-		if target_object.kind == .SYMBOL {
-			name := cast(^SymbolObject)target_object
-			if symbol_is_reserved_word(name) {
-				compile_error(fmt.tprintf("cannot define reserved name `%s`", name.text))
-				return
-			}
+		validate_binding_target(builder, target, introduced_symbols[:], &introduced_symbol_count)
+		if Compiler.failed { return }
 
-			for i := builder.current_scope_local_start; i < builder.local_count; i += 1 {
-				if builder.local_bindings[i].symbol == name {
-					compile_error(fmt.tprintf("duplicate definition `%s` in the same scope", name.text))
-					return
-				}
-			}
+		source_slot := claim_slot(builder)
+		if Compiler.failed { return }
 
-			binding_slot := claim_slot(builder)
-			if Compiler.failed { return }
+		// Ordered binding: target names are not visible while the RHS compiles.
+		compile_expr(builder, expression, source_slot)
+		if Compiler.failed { return }
 
-			// Ordered binding: the name is not visible while its RHS compiles.
-			compile_expr(builder, expression, binding_slot)
-			if Compiler.failed { return }
-
-			binding := LocalBinding{
-				symbol  = name,
-				slot    = binding_slot,
-				mutable = mutable,
-			}
-
-			builder.local_bindings[builder.local_count] = binding
-			builder.local_count += 1
-
-			if builder.parent == nil {
-				append(&builder.file_bindings, binding)
-			}
-			continue
-		}
-
-		if target_object.kind == .VECTOR {
-			pattern := cast(^VectorObject)target_object
-			count := len(pattern.items)
-			if count == 0 {
-				compile_error("vector destructuring pattern cannot be empty")
-				return
-			}
-
-			if count > int(max(u8)) {
-				compile_error("vector destructuring supports at most 255 bindings")
-				return
-			}
-
-			for i := 0; i < count; i += 1 {
-				item_object, item_is_object := pattern.items[i].(^Object)
-				if !item_is_object || item_object.kind != .SYMBOL {
-					compile_error("vector destructuring binding must be a name")
-					return
-				}
-
-				name := cast(^SymbolObject)item_object
-				if symbol_is_reserved_word(name) {
-					compile_error(fmt.tprintf("cannot define reserved name `%s`", name.text))
-					return
-				}
-
-				for j := 0; j < i; j += 1 {
-					previous_object, _ := pattern.items[j].(^Object)
-					previous := cast(^SymbolObject)previous_object
-					if previous == name {
-						compile_error(fmt.tprintf("duplicate definition `%s` in vector destructuring pattern", name.text))
-						return
-					}
-				}
-
-				for j := builder.current_scope_local_start; j < builder.local_count; j += 1 {
-					if builder.local_bindings[j].symbol == name {
-						compile_error(fmt.tprintf("duplicate definition `%s` in the same scope", name.text))
-						return
-					}
-				}
-			}
-
-			source_slot := claim_slot(builder)
-			if Compiler.failed { return }
-
-			// Ordered binding: destructured names are not visible while RHS compiles.
-			compile_expr(builder, expression, source_slot)
-			if Compiler.failed { return }
-
-			first_binding_slot := source_slot
-			reserve_slots_until(builder, first_binding_slot + count)
-			if Compiler.failed { return }
-
-			emit_unpack_vector(builder, source_slot, first_binding_slot, count)
-
-			for i := 0; i < count; i += 1 {
-				item_object, _ := pattern.items[i].(^Object)
-				name := cast(^SymbolObject)item_object
-
-				binding := LocalBinding{
-					symbol  = name,
-					slot    = first_binding_slot + i,
-					mutable = mutable,
-				}
-
-				builder.local_bindings[builder.local_count] = binding
-				builder.local_count += 1
-
-				if builder.parent == nil {
-					append(&builder.file_bindings, binding)
-				}
-			}
-			continue
-		}
-
-		compile_error(fmt.tprintf("`%s` binding target must be a name or vector destructuring pattern", form_name))
-		return
+		compile_binding_target(builder, target, source_slot, mutable)
+		if Compiler.failed { return }
 	}
 }
 
@@ -2523,7 +2582,7 @@ compile_var :: proc(builder: ^CodeBuilder, form: Value) {
 
 compile_import :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 	if len(list.items) != 2 && len(list.items) != 3 {
-		compile_error("`import` expects a path or namespace and path")
+		compile_error("`import` expects a path, or namespace and path.\nusage:\n  (import \"path\")\n  (import namespace \"path\")")
 		return
 	}
 
@@ -2535,13 +2594,13 @@ compile_import :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 	} else {
 		alias_object, alias_is_object := list.items[1].(^Object)
 		if !alias_is_object || alias_object.kind != .SYMBOL {
-			compile_error("`import` namespace must be a name")
+			compile_error("`import` namespace must be a symbol.")
 			return
 		}
 
 		alias := cast(^SymbolObject)alias_object
 		if symbol_is_reserved_word(alias) {
-			compile_error(fmt.tprintf("cannot use reserved name `%s` as import namespace", alias.text))
+			compile_error(fmt.tprintf("cannot use reserved symbol `%s` as import namespace.", alias.text))
 			return
 		}
 
@@ -2551,7 +2610,7 @@ compile_import :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 
 	path_object, path_is_object := path_value.(^Object)
 	if !path_is_object || path_object.kind != .STRING {
-		compile_error("`import` path must be a string")
+		compile_error("`import` path must be a string.")
 		return
 	}
 
@@ -2561,13 +2620,13 @@ compile_import :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 	}
 
 	if namespace_text == "" {
-		compile_error("`import` namespace cannot be empty")
+		compile_error("`import` namespace cannot be empty.")
 		return
 	}
 
 	for i := 0; i < len(namespace_text); i += 1 {
 		if namespace_text[i] == '/' || namespace_text[i] == '\\' {
-			compile_error("`import` namespace cannot contain a path separator")
+			compile_error("`import` namespace cannot contain a path separator.")
 			return
 		}
 	}
@@ -2582,7 +2641,7 @@ compile_import :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 
 		for i := builder.current_scope_local_start; i < builder.local_count; i += 1 {
 			if builder.local_bindings[i].symbol == qualified_symbol {
-				compile_error(fmt.tprintf("duplicate imported binding `%s`", qualified_text))
+				compile_error(fmt.tprintf("duplicate imported binding `%s`.", qualified_text))
 				return
 			}
 		}
@@ -2613,7 +2672,7 @@ compile_export :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 	for i := 1; i < len(list.items); i += 1 {
 		name_object, name_is_object := list.items[i].(^Object)
 		if !name_is_object || name_object.kind != .SYMBOL {
-			compile_error("`export` names must be names")
+			compile_error("`export` entries must be symbols.")
 			return
 		}
 
@@ -2621,7 +2680,7 @@ compile_export :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 
 		for existing in builder.exports {
 			if existing.symbol == name {
-				compile_error(fmt.tprintf("duplicate export `%s`", name.text))
+				compile_error(fmt.tprintf("duplicate export for symbol `%s`.", name.text))
 				return
 			}
 		}
@@ -2636,7 +2695,7 @@ compile_export :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 		}
 
 		if !found {
-			compile_error(fmt.tprintf("exported name `%s` is not a file binding", name.text))
+			compile_error(fmt.tprintf("exported symbol `%s` is not a file binding.", name.text))
 			return
 		}
 	}
@@ -2719,7 +2778,7 @@ compile_root_forms :: proc(builder: ^CodeBuilder, forms: []Value, dst: int) {
 
 					if head.text == "import" {
 						if seen_non_import {
-							compile_error("`import` forms must appear before other root forms")
+							compile_error("`import` forms must appear before other top-level forms.")
 							return
 						}
 
@@ -2733,7 +2792,7 @@ compile_root_forms :: proc(builder: ^CodeBuilder, forms: []Value, dst: int) {
 						if Compiler.failed { return }
 
 						if form_index + 1 < len(forms) {
-							compile_error("`export` must be the final root form")
+							compile_error("`export` must be the final top-level form.")
 							return
 						}
 
@@ -2846,19 +2905,19 @@ compile_effect :: proc(builder: ^CodeBuilder, form: Value) {
 				head := cast(^SymbolObject)head_object
 
 				if head.text == "def" {
-					compile_error("`def` is not valid in expression position")
+					compile_error("`def` is not valid in expression position.")
 					return
 				}
 				if head.text == "var" {
-					compile_error("`var` is not valid in expression position")
+					compile_error("`var` is not valid in expression position.")
 					return
 				}
 				if head.text == "import" {
-					compile_error("`import` is only valid at file root")
+					compile_error("`import` is only valid at file top level.")
 					return
 				}
 				if head.text == "export" {
-					compile_error("`export` is only valid at file root")
+					compile_error("`export` is only valid at file top level.")
 					return
 				}
 				if head.text == "set" {
@@ -2945,7 +3004,7 @@ compile_do_effect :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 
 compile_if_effect :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 	if len(list.items) < 3 || len(list.items) > 4 {
-		compile_error("`if` expects a condition, then-branch, and optional else-branch")
+		compile_error("`if` expects condition and branch expressions.\nusage: (if cond then else?)")
 		return
 	}
 
@@ -2973,7 +3032,7 @@ compile_if_effect :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 
 compile_while_effect :: proc(builder: ^CodeBuilder, list: ^ListObject) {
 	if len(list.items) < 2 {
-		compile_error("`while` expects a condition")
+		compile_error("`while` expects a condition.\nusage:\n  (while cond\n    body-form...)")
 		return
 	}
 
@@ -3026,7 +3085,7 @@ compile_do :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 
 compile_if :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if len(list.items) < 3 || len(list.items) > 4 {
-		compile_error("`if` expects a condition, then-branch, and optional else-branch")
+		compile_error("`if` expects condition and branch expressions.\nusage: (if cond then else?)")
 		return
 	}
 
@@ -3054,7 +3113,7 @@ compile_if :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 
 compile_cond :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if (len(list.items) - 1) % 2 != 0 {
-		compile_error("`cond` expects test/expression pairs")
+		compile_error("`cond` expects test/expression pairs.\nusage:\n  (cond\n    test expr\n    test expr\n    ...)")
 		return
 	}
 
@@ -3089,7 +3148,7 @@ compile_cond :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 
 compile_case :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if len(list.items) < 2 {
-		compile_error("`case` expects a subject")
+		compile_error("`case` expects a subject.\nusage:\n  (case subject\n    label expr\n    label expr\n    default?)")
 		return
 	}
 
@@ -3117,14 +3176,14 @@ compile_case :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	for i := 2; i < pair_end; i += 2 {
 		label, label_is_literal := constant_from_form(list.items[i])
 		if !label_is_literal {
-			compile_error("`case` label must be a literal")
+			compile_error("`case` label must be a literal value.")
 			return
 		}
 
 		for j := 2; j < i; j += 2 {
 			previous_label, _ := constant_from_form(list.items[j])
 			if values_equal(previous_label, label) {
-				compile_error("duplicate `case` label")
+				compile_error("duplicate `case` label.")
 				return
 			}
 		}
@@ -3254,7 +3313,7 @@ compile_nil_fallback :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int)
 
 compile_while :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if len(list.items) < 2 {
-		compile_error("`while` expects a condition")
+		compile_error("`while` expects a condition.\nusage:\n  (while cond\n    body-form...)")
 		return
 	}
 
@@ -3291,7 +3350,7 @@ compile_while :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 
 compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_result: bool) {
 	if len(list.items) != 3 {
-		compile_error("`set` expects a target and value")
+		compile_error("`set` expects an assignment target and value.\nusage: (set target expr)")
 		return
 	}
 
@@ -3300,7 +3359,7 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 
 	target_object, target_is_object := target.(^Object)
 	if !target_is_object {
-		compile_error("invalid `set` target")
+		compile_error("invalid assignment target.")
 		return
 	}
 
@@ -3310,7 +3369,7 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 		binding, local_found := find_local(builder, symbol)
 		if local_found {
 			if !binding.mutable {
-				compile_error(fmt.tprintf("cannot set immutable binding `%s`", symbol.text))
+				compile_error(fmt.tprintf("cannot mutate immutable binding `%s`.", symbol.text))
 				return
 			}
 
@@ -3398,7 +3457,7 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 		upvalue_index, upvalue_found := resolve_upvalue(builder, symbol)
 		if upvalue_found {
 			if !builder.upvalue_descs[upvalue_index].mutable {
-				compile_error(fmt.tprintf("cannot set immutable binding `%s`", symbol.text))
+				compile_error(fmt.tprintf("cannot mutate immutable binding `%s`.", symbol.text))
 				return
 			}
 
@@ -3412,15 +3471,15 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 		builtin_index, builtin_found := find_builtin(Active_VM, symbol)
 		if builtin_found {
 			if !Active_VM.builtins[builtin_index].mutable {
-				compile_error(fmt.tprintf("cannot set immutable binding `%s`", symbol.text))
+				compile_error(fmt.tprintf("cannot mutate immutable binding `%s`.", symbol.text))
 				return
 			}
 
-			compile_error("setting mutable builtin bindings is not implemented")
+			compile_error("mutating built-in bindings is not implemented.")
 			return
 		}
 
-		compile_error(fmt.tprintf("cannot set undefined binding `%s`", symbol.text))
+		compile_error(fmt.tprintf("cannot assign to symbol `%s`; no visible binding.", symbol.text))
 		return
 	}
 
@@ -3428,27 +3487,27 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 		target_list := cast(^ListObject)target_object
 
 		if len(target_list.items) == 0 {
-			compile_error("`set` target must be a name, idx place, or key place")
+			compile_error("assignment target must be a symbol, `idx` place, or `key` place.")
 			return
 		}
 
 		head_object, head_is_object := target_list.items[0].(^Object)
 		if !head_is_object || head_object.kind != .SYMBOL {
-			compile_error("`set` target must be a name, idx place, or key place")
+			compile_error("assignment target must be a symbol, `idx` place, or `key` place.")
 			return
 		}
 
 		head := cast(^SymbolObject)head_object
 		if head.text != "idx" && head.text != "key" {
-			compile_error("`set` target must be a name, idx place, or key place")
+			compile_error("assignment target must be a symbol, `idx` place, or `key` place.")
 			return
 		}
 
 		if len(target_list.items) != 3 {
 			if head.text == "idx" {
-				compile_error("`idx` set target expects a vector and index")
+				compile_error("`idx` place expects vector and index.\nusage: (set (idx vector index) value)")
 			} else {
-				compile_error("`key` set target expects a map and key")
+				compile_error("`key` place expects map and key.\nusage: (set (key map key) value)")
 			}
 			return
 		}
@@ -3497,13 +3556,13 @@ compile_set :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int, keep_res
 		return
 	}
 
-	compile_error("invalid `set` target")
+	compile_error("invalid assignment target.")
 }
 
 compile_call :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	argument_count := len(list.items) - 1
 	if argument_count > int(max(u8)) {
-		compile_error("call has too many arguments")
+		compile_error("call has too many arguments.")
 		return
 	}
 
@@ -3534,7 +3593,7 @@ compile_builtin_fast_path :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, 
 		assert(operand_count >= 2, "arithmetic fast path expects at least two operands")
 
 		if operand_count > int(max(u8)) {
-			compile_error("arithmetic call has too many arguments")
+			compile_error("arithmetic call has too many arguments.")
 			return
 		}
 
@@ -3654,7 +3713,7 @@ compile_builtin_fast_path :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, 
 
 	if symbol.text == "push" {
 		if len(args) > int(max(u8)) {
-			compile_error("`push` has too many arguments")
+			compile_error("`push` has too many arguments.")
 			return
 		}
 
@@ -3690,32 +3749,32 @@ compile_builtin_fast_path :: proc(builder: ^CodeBuilder, symbol: ^SymbolObject, 
 
 compile_fn :: proc(parent: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if len(list.items) < 2 {
-		compile_error("`fn` expects a parameter list")
+		compile_error("`fn` expects a parameter list.\nusage:\n  (fn (params...)\n    body-form...)")
 		return
 	}
 
 	params_object, params_is_object := list.items[1].(^Object)
 	if !params_is_object || params_object.kind != .LIST {
-		compile_error("`fn` parameters must be a list")
+		compile_error("`fn` parameters must be a list.\nusage:\n  (fn (params...)\n    body-form...)")
 		return
 	}
 
 	params := cast(^ListObject)params_object
 	if len(params.items) > int(max(u8)) {
-		compile_error("function has too many parameters")
+		compile_error("function has too many parameters.")
 		return
 	}
 
 	for i := 0; i < len(params.items); i += 1 {
 		param_object, param_is_object := params.items[i].(^Object)
 		if !param_is_object || param_object.kind != .SYMBOL {
-			compile_error("function parameter must be a name")
+			compile_error("function parameter must be a symbol.")
 			return
 		}
 
 		param := cast(^SymbolObject)param_object
 		if symbol_is_reserved_word(param) {
-			compile_error(fmt.tprintf("cannot use reserved name `%s` as parameter", param.text))
+			compile_error(fmt.tprintf("cannot use reserved symbol `%s` as parameter.", param.text))
 			return
 		}
 
@@ -3723,7 +3782,7 @@ compile_fn :: proc(parent: ^CodeBuilder, list: ^ListObject, dst: int) {
 			previous_object, _ := params.items[j].(^Object)
 			previous := cast(^SymbolObject)previous_object
 			if previous == param {
-				compile_error(fmt.tprintf("duplicate parameter `%s`", param.text))
+				compile_error(fmt.tprintf("duplicate parameter `%s`.", param.text))
 				return
 			}
 		}
@@ -3759,7 +3818,7 @@ compile_fn :: proc(parent: ^CodeBuilder, list: ^ListObject, dst: int) {
 	child_code := end_code(&child)
 
 	if len(parent.child_codes) > int(max(u16)) {
-		compile_error("too many function literals in one body")
+		compile_error("body contains too many function literals.")
 		delete_code(child_code)
 		return
 	}
@@ -3775,7 +3834,7 @@ compile_fn :: proc(parent: ^CodeBuilder, list: ^ListObject, dst: int) {
 // Non-symbol heads are ordinary calls.
 compile_list_expr :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	if len(list.items) == 0 {
-		compile_error("empty list is not an expression")
+		compile_error("empty list is not an expression.")
 		return
 	}
 
@@ -3788,19 +3847,19 @@ compile_list_expr :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	head := cast(^SymbolObject)head_object
 
 	if head.text == "def" {
-		compile_error("`def` is not valid in expression position")
+		compile_error("`def` is not valid in expression position.")
 		return
 	}
 	if head.text == "var" {
-		compile_error("`var` is not valid in expression position")
+		compile_error("`var` is not valid in expression position.")
 		return
 	}
 	if head.text == "import" {
-		compile_error("`import` is only valid at file root")
+		compile_error("`import` is only valid at file top level.")
 		return
 	}
 	if head.text == "export" {
-		compile_error("`export` is only valid at file root")
+		compile_error("`export` is only valid at file top level.")
 		return
 	}
 	if head.text == "set" {
@@ -3848,9 +3907,9 @@ compile_list_expr :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 	   head.text == "key" {
 		if len(list.items) != 3 {
 			if head.text == "idx" {
-				compile_error("`idx` expects a vector and index")
+				compile_error("`idx` expects vector and index.\nusage: (idx vector index)")
 			} else {
-				compile_error("`key` expects a map and key")
+				compile_error("`key` expects map and key.\nusage: (key map key)")
 			}
 			return
 		}
@@ -3940,7 +3999,7 @@ compile_list_expr :: proc(builder: ^CodeBuilder, list: ^ListObject, dst: int) {
 		return
 	}
 
-	compile_error(fmt.tprintf("undefined name `%s`", head.text))
+	compile_error(fmt.tprintf("symbol `%s` has no visible binding.", head.text))
 }
 
 // The caller reserves dst. Expression compilation may use higher scratch slots
@@ -3983,7 +4042,7 @@ compile_expr :: proc(builder: ^CodeBuilder, value: Value, dst: int) {
 			compile_map_expr(builder, cast(^MapObject)v, dst)
 
 		case .NATIVE_FUNCTION, .FUNCTION:
-			compile_error("runtime function object cannot appear as a literal form")
+			compile_error("function value cannot appear as a source literal.")
 		}
 	}
 
@@ -4268,7 +4327,7 @@ run_code :: proc(code: ^Code) -> Value {
 						break
 					}
 					if divisor == 0 {
-						runtime_error("/ divisor cannot be zero")
+						runtime_error("`/` divisor cannot be zero.")
 						return Value{}
 					}
 					float_result /= f64(divisor)
@@ -4356,7 +4415,7 @@ run_code :: proc(code: ^Code) -> Value {
 			rhs_int, rhs_is_int := rhs.(i64)
 			if lhs_is_int && rhs_is_int {
 				if rhs_int == 0 {
-					runtime_error("/ divisor cannot be zero")
+					runtime_error("`/` divisor cannot be zero.")
 					return Value{}
 				}
 				vm.slots[dst] = Value(f64(lhs_int) / f64(rhs_int))
@@ -4379,7 +4438,7 @@ run_code :: proc(code: ^Code) -> Value {
 			rhs_int, rhs_is_int := rhs.(i64)
 			if lhs_is_int && rhs_is_int {
 				if rhs_int == 0 {
-					runtime_error("% divisor cannot be zero")
+					runtime_error("`%` divisor cannot be zero.")
 					return Value{}
 				}
 				if lhs_int == min(i64) && rhs_int == -1 {
@@ -4404,7 +4463,7 @@ run_code :: proc(code: ^Code) -> Value {
 			rhs_int, rhs_is_int := rhs.(i64)
 			if lhs_is_int && rhs_is_int {
 				if rhs_int == 0 {
-					runtime_error("% divisor cannot be zero")
+					runtime_error("`%` divisor cannot be zero.")
 					return Value{}
 				}
 				if lhs_int == min(i64) && rhs_int == -1 {
@@ -4487,7 +4546,7 @@ run_code :: proc(code: ^Code) -> Value {
 
 			callee_object, callee_is_object := callee.(^Object)
 			if !callee_is_object {
-				runtime_error("value is not callable")
+				runtime_error("cannot call non-function value.")
 				return Value{}
 			}
 
@@ -4507,7 +4566,7 @@ run_code :: proc(code: ^Code) -> Value {
 				function := cast(^FunctionObject)callee_object
 
 				if argument_count > function.code.param_count {
-					runtime_error(fmt.tprintf("function expected at most %d arguments, got %d", function.code.param_count, argument_count))
+					runtime_error(fmt.tprintf("function expected at most %d arguments, got %d.", function.code.param_count, argument_count))
 					return Value{}
 				}
 
@@ -4515,7 +4574,7 @@ run_code :: proc(code: ^Code) -> Value {
 
 				wanted_slots := callee_slot_base + function.code.frame_slot_count
 				if wanted_slots > MAX_VM_SLOTS {
-					runtime_error("VM slot limit exceeded")
+					runtime_error("runtime stack limit exceeded.")
 					return Value{}
 				}
 
@@ -4524,7 +4583,7 @@ run_code :: proc(code: ^Code) -> Value {
 				}
 
 				if vm.frame_count >= MAX_CALL_FRAMES {
-					runtime_error("call frame limit exceeded")
+					runtime_error("call depth limit exceeded.")
 					return Value{}
 				}
 
@@ -4546,7 +4605,7 @@ run_code :: proc(code: ^Code) -> Value {
 				continue
 
 			case .STRING, .SYMBOL, .LIST, .VECTOR, .MAP:
-				runtime_error("value is not callable")
+				runtime_error("cannot call non-function value.")
 				return Value{}
 			}
 
@@ -4601,19 +4660,19 @@ run_code :: proc(code: ^Code) -> Value {
 
 			vector_object, vector_is_object := vector_value.(^Object)
 			if !vector_is_object || vector_object.kind != .VECTOR {
-				runtime_error("idx expects vector")
+				runtime_error("expected vector as first argument.\nusage: (idx vector index)")
 				return Value{}
 			}
 
 			index, index_is_int := index_value.(i64)
 			if !index_is_int {
-				runtime_error("vector index must be int")
+				runtime_error("expected int as second argument.\nusage: (idx vector index)")
 				return Value{}
 			}
 
 			vector := cast(^VectorObject)vector_object
 			if index < 0 || index >= i64(len(vector.items)) {
-				runtime_error("vector index out of range")
+				runtime_error("vector index out of range.")
 				return Value{}
 			}
 
@@ -4635,7 +4694,7 @@ run_code :: proc(code: ^Code) -> Value {
 
 			map_object, map_is_object := map_value.(^Object)
 			if !map_is_object || map_object.kind != .MAP {
-				runtime_error("key expects map")
+				runtime_error("expected map as first argument.\nusage: (key map key)")
 				return Value{}
 			}
 
@@ -4660,19 +4719,19 @@ run_code :: proc(code: ^Code) -> Value {
 
 			vector_object, vector_is_object := vector_value.(^Object)
 			if !vector_is_object || vector_object.kind != .VECTOR {
-				runtime_error("idx set expects vector")
+				runtime_error("expected vector in assignment target.\nusage: (set (idx vector index) value)")
 				return Value{}
 			}
 
 			index, index_is_int := index_value.(i64)
 			if !index_is_int {
-				runtime_error("vector set index must be int")
+				runtime_error("expected int index in assignment target.\nusage: (set (idx vector index) value)")
 				return Value{}
 			}
 
 			vector := cast(^VectorObject)vector_object
 			if index < 0 || index >= i64(len(vector.items)) {
-				runtime_error("vector index out of range")
+				runtime_error("vector index out of range.")
 				return Value{}
 			}
 
@@ -4695,7 +4754,7 @@ run_code :: proc(code: ^Code) -> Value {
 
 			map_object, map_is_object := map_value.(^Object)
 			if !map_is_object || map_object.kind != .MAP {
-				runtime_error("key set expects map")
+				runtime_error("expected map in assignment target.\nusage: (set (key map key) value)")
 				return Value{}
 			}
 
@@ -4710,13 +4769,13 @@ run_code :: proc(code: ^Code) -> Value {
 
 			source_object, source_is_object := vm.slots[source_slot].(^Object)
 			if !source_is_object || source_object.kind != .VECTOR {
-				runtime_error("vector destructuring expects vector")
+				runtime_error("expected vector for vector pattern.")
 				return Value{}
 			}
 
 			vector := cast(^VectorObject)source_object
 			if len(vector.items) < count {
-				runtime_error(fmt.tprintf("vector destructuring expected at least %d values, got %d", count, len(vector.items)))
+				runtime_error(fmt.tprintf("vector pattern expected at least %d items, got %d.", count, len(vector.items)))
 				return Value{}
 			}
 
