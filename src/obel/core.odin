@@ -800,8 +800,35 @@ native_function_predicate :: proc(vm: ^VM, args: []Value) -> Value {
 		runtime_error("`fn?` expects one argument.\nusage: (fn? value)")
 		return Value{}
 	}
+	return Value(bool(value_is_function(args[0])))
+}
+
+// (empty? value) bool; true if a string, vector, or map has no contents.
+native_empty_predicate :: proc(vm: ^VM, args: []Value) -> Value {
+	if len(args) != 1 {
+		runtime_error("`empty?` expects one argument.\nusage: (empty? value)")
+		return Value{}
+	}
+
 	object, is_object := args[0].(^Object)
-	return Value(bool(is_object && (object.kind == .NATIVE_FUNCTION || object.kind == .FUNCTION)))
+	if !is_object {
+		runtime_error("`empty?` expected string, vector, or map as argument.")
+		return Value{}
+	}
+
+	switch object.kind {
+	case .STRING:
+		return Value(bool(len((cast(^StringObject)object).text) == 0))
+	case .VECTOR:
+		return Value(bool(len((cast(^VectorObject)object).items) == 0))
+	case .MAP:
+		return Value(bool((cast(^MapObject)object).count == 0))
+	case .SYMBOL, .LIST, .NATIVE_FUNCTION, .FUNCTION:
+		runtime_error("`empty?` expected string, vector, or map as argument.")
+		return Value{}
+	}
+
+	return Value{}
 }
 
 // (len value) int; Length of a string, vector, or map.
@@ -1165,20 +1192,7 @@ native_vals :: proc(vm: ^VM, args: []Value) -> Value {
 	return Value(cast(^Object)new_vector_object(items))
 }
 
-// (pairs map) vector; Map key/value pairs as two-item vectors, in unspecified order.
-native_pairs :: proc(vm: ^VM, args: []Value) -> Value {
-	if len(args) != 1 {
-		runtime_error("`pairs` expects one argument.\nusage: (pairs map)")
-		return Value{}
-	}
-
-	object, is_object := args[0].(^Object)
-	if !is_object || object.kind != .MAP {
-		runtime_error("`pairs` expected map as argument.")
-		return Value{}
-	}
-
-	map_object := cast(^MapObject)object
+map_pairs_snapshot :: proc(map_object: ^MapObject) -> ^VectorObject {
 	items := make([dynamic]Value)
 	reserve(&items, map_object.count)
 
@@ -1193,7 +1207,24 @@ native_pairs :: proc(vm: ^VM, args: []Value) -> Value {
 		append(&items, Value(cast(^Object)new_vector_object(pair)))
 	}
 
-	return Value(cast(^Object)new_vector_object(items))
+	return new_vector_object(items)
+}
+
+// (pairs map) vector; Map key/value pairs as two-item vectors, in unspecified order.
+native_pairs :: proc(vm: ^VM, args: []Value) -> Value {
+	if len(args) != 1 {
+		runtime_error("`pairs` expects one argument.\nusage: (pairs map)")
+		return Value{}
+	}
+
+	object, is_object := args[0].(^Object)
+	if !is_object || object.kind != .MAP {
+		runtime_error("`pairs` expected map as argument.")
+		return Value{}
+	}
+
+	map_object := cast(^MapObject)object
+	return Value(cast(^Object)map_pairs_snapshot(map_object))
 }
 
 // (merge map map...) map; Fresh map with later maps overriding earlier maps.
@@ -1230,6 +1261,202 @@ native_merge :: proc(vm: ^VM, args: []Value) -> Value {
 	}
 
 	return Value(cast(^Object)result)
+}
+
+// Higher-order collection builtins ---------------------------------------------------------------
+
+collection_callback_items :: proc(collection: Value, proc_name: string) -> (item_vector: ^VectorObject, initial_length: int, valid: bool) {
+	object, is_object := collection.(^Object)
+	if !is_object {
+		runtime_error(fmt.tprintf("`%s` expected vector or map as collection.", proc_name))
+		return nil, 0, false
+	}
+
+	switch object.kind {
+	case .VECTOR:
+		vector := cast(^VectorObject)object
+		return vector, len(vector.items), true
+
+	case .MAP:
+		snapshot := map_pairs_snapshot(cast(^MapObject)object)
+		return snapshot, len(snapshot.items), true
+
+	case .STRING, .SYMBOL, .LIST, .NATIVE_FUNCTION, .FUNCTION:
+		runtime_error(fmt.tprintf("`%s` expected vector or map as collection.", proc_name))
+		return nil, 0, false
+	}
+
+	assert(false, "invalid collection object kind")
+	return nil, 0, false
+}
+
+// (map f coll) vector; Transform each collection item.
+native_map :: proc(vm: ^VM, args: []Value) -> Value {
+	if len(args) != 2 {
+		runtime_error("`map` expects two arguments.\nusage: (map f coll)")
+		return Value{}
+	}
+	if !value_is_function(args[0]) {
+		runtime_error("`map` expected function as first argument.")
+		return Value{}
+	}
+
+	item_vector, initial_length, items_ok := collection_callback_items(args[1], "map")
+	if !items_ok { return Value{} }
+
+	results := make([dynamic]Value)
+	reserve(&results, initial_length)
+
+	call_args: [1]Value
+	for i := 0; i < initial_length; i += 1 {
+		if i >= len(item_vector.items) {
+			runtime_error("vector index out of range.")
+			return Value{}
+		}
+
+		call_args[0] = item_vector.items[i]
+		result := call_function_value(vm, args[0], call_args[:])
+		if vm.error_string != "" { return Value{} }
+
+		append(&results, result)
+	}
+
+	return Value(cast(^Object)new_vector_object(results))
+}
+
+// (filter pred coll) vector; Keep original items where pred returns truthy.
+native_filter :: proc(vm: ^VM, args: []Value) -> Value {
+	if len(args) != 2 {
+		runtime_error("`filter` expects two arguments.\nusage: (filter pred coll)")
+		return Value{}
+	}
+	if !value_is_function(args[0]) {
+		runtime_error("`filter` expected function as first argument.")
+		return Value{}
+	}
+
+	item_vector, initial_length, items_ok := collection_callback_items(args[1], "filter")
+	if !items_ok { return Value{} }
+
+	results := make([dynamic]Value)
+
+	call_args: [1]Value
+	for i := 0; i < initial_length; i += 1 {
+		if i >= len(item_vector.items) {
+			runtime_error("vector index out of range.")
+			return Value{}
+		}
+
+		item := item_vector.items[i]
+		call_args[0] = item
+		keep := call_function_value(vm, args[0], call_args[:])
+		if vm.error_string != "" { return Value{} }
+
+		if !value_is_falsey(keep) {
+			append(&results, item)
+		}
+	}
+
+	return Value(cast(^Object)new_vector_object(results))
+}
+
+// (reduce f start coll) value; Fold collection items through f.
+native_reduce :: proc(vm: ^VM, args: []Value) -> Value {
+	if len(args) != 3 {
+		runtime_error("`reduce` expects three arguments.\nusage: (reduce f start coll)")
+		return Value{}
+	}
+	if !value_is_function(args[0]) {
+		runtime_error("`reduce` expected function as first argument.")
+		return Value{}
+	}
+
+	item_vector, initial_length, items_ok := collection_callback_items(args[2], "reduce")
+	if !items_ok { return Value{} }
+
+	result := args[1]
+
+	call_args: [2]Value
+	for i := 0; i < initial_length; i += 1 {
+		if i >= len(item_vector.items) {
+			runtime_error("vector index out of range.")
+			return Value{}
+		}
+
+		call_args[0] = result
+		call_args[1] = item_vector.items[i]
+		result = call_function_value(vm, args[0], call_args[:])
+		if vm.error_string != "" { return Value{} }
+	}
+
+	return result
+}
+
+// (find pred coll) value|nil; First original item where pred returns truthy.
+native_find :: proc(vm: ^VM, args: []Value) -> Value {
+	if len(args) != 2 {
+		runtime_error("`find` expects two arguments.\nusage: (find pred coll)")
+		return Value{}
+	}
+	if !value_is_function(args[0]) {
+		runtime_error("`find` expected function as first argument.")
+		return Value{}
+	}
+
+	item_vector, initial_length, items_ok := collection_callback_items(args[1], "find")
+	if !items_ok { return Value{} }
+
+	call_args: [1]Value
+	for i := 0; i < initial_length; i += 1 {
+		if i >= len(item_vector.items) {
+			runtime_error("vector index out of range.")
+			return Value{}
+		}
+
+		item := item_vector.items[i]
+		call_args[0] = item
+		found := call_function_value(vm, args[0], call_args[:])
+		if vm.error_string != "" { return Value{} }
+
+		if !value_is_falsey(found) {
+			return item
+		}
+	}
+
+	return Value{}
+}
+
+// (pick f coll) value|nil; First truthy value produced by f.
+native_pick :: proc(vm: ^VM, args: []Value) -> Value {
+	if len(args) != 2 {
+		runtime_error("`pick` expects two arguments.\nusage: (pick f coll)")
+		return Value{}
+	}
+	if !value_is_function(args[0]) {
+		runtime_error("`pick` expected function as first argument.")
+		return Value{}
+	}
+
+	item_vector, initial_length, items_ok := collection_callback_items(args[1], "pick")
+	if !items_ok { return Value{} }
+
+	call_args: [1]Value
+	for i := 0; i < initial_length; i += 1 {
+		if i >= len(item_vector.items) {
+			runtime_error("vector index out of range.")
+			return Value{}
+		}
+
+		call_args[0] = item_vector.items[i]
+		result := call_function_value(vm, args[0], call_args[:])
+		if vm.error_string != "" { return Value{} }
+
+		if !value_is_falsey(result) {
+			return result
+		}
+	}
+
+	return Value{}
 }
 
 // (print value...) nil; Display values separated by spaces, followed by newline.
@@ -2221,6 +2448,7 @@ install_builtins :: proc(vm: ^VM) {
 	bind_native_builtin(vm, "vec?", native_vector_predicate)
 	bind_native_builtin(vm, "map?", native_map_predicate)
 	bind_native_builtin(vm, "fn?", native_function_predicate)
+	bind_native_builtin(vm, "empty?", native_empty_predicate)
 	bind_native_builtin(vm, "len", native_len)
 	bind_native_builtin(vm, "copy", native_copy)
 	bind_native_builtin(vm, "clear", native_clear)
@@ -2236,6 +2464,11 @@ install_builtins :: proc(vm: ^VM) {
 	bind_native_builtin(vm, "keys", native_keys)
 	bind_native_builtin(vm, "vals", native_vals)
 	bind_native_builtin(vm, "pairs", native_pairs)
+	bind_native_builtin(vm, "map", native_map)
+	bind_native_builtin(vm, "filter", native_filter)
+	bind_native_builtin(vm, "reduce", native_reduce)
+	bind_native_builtin(vm, "find", native_find)
+	bind_native_builtin(vm, "pick", native_pick)
 	bind_native_builtin(vm, "merge", native_merge)
 	bind_native_builtin(vm, "print", native_print)
 	bind_native_builtin(vm, "write", native_write)

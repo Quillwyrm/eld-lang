@@ -1,5 +1,5 @@
 *.zip
-
+_*
 _docs/
 _tests/
 _work/

@@ -240,6 +240,7 @@ VM :: struct {
 	frame_count: int,
 
 	open_upvalues: [dynamic]^Upvalue,
+	call_slot_top: int,
 
 	builtins: [dynamic]Binding,
 	modules:  [dynamic]Module,
@@ -402,6 +403,11 @@ find_module :: proc(vm: ^VM, id: string) -> (int, bool) {
 	}
 
 	return -1, false
+}
+
+value_is_function :: proc(value: Value) -> bool {
+	object, is_object := value.(^Object)
+	return is_object && (object.kind == .NATIVE_FUNCTION || object.kind == .FUNCTION)
 }
 
 
@@ -4667,20 +4673,128 @@ close_upvalues_from :: proc(vm: ^VM, absolute_start: int) {
 	}
 }
 
-// Executes trusted Code against the selected VM using frame-relative slot operands.
-run_code :: proc(code: ^Code) -> Value {
-	vm := Active_VM
+start_function_call :: proc(vm: ^VM, base, argument_count: int) -> (result: Value, frame_pushed: bool) {
+	callee := vm.slots[base]
 
-	clear(&vm.open_upvalues)
-
-	vm.frames[0] = CallFrame{
-		code              = code,
-		upvalues          = nil,
-		instruction_index = 0,
-		slot_base         = 0,
+	callee_object, callee_is_object := callee.(^Object)
+	if !callee_is_object {
+		runtime_error("cannot call non-function value.")
+		return Value{}, false
 	}
-	vm.frame_count = 1
 
+	switch callee_object.kind {
+	case .NATIVE_FUNCTION:
+		function := cast(^NativeFunctionObject)callee_object
+		args := vm.slots[base + 1:base + 1 + argument_count]
+
+		result = function.native(vm, args)
+		if vm.error_string != "" {
+			return Value{}, false
+		}
+
+		return result, false
+
+	case .FUNCTION:
+		function := cast(^FunctionObject)callee_object
+		fixed_count := function.code.fixed_param_count
+
+		if !function.code.has_rest_param && argument_count > fixed_count {
+			runtime_error(fmt.tprintf("function expected at most %d arguments, got %d.", fixed_count, argument_count))
+			return Value{}, false
+		}
+
+		callee_slot_base := base + 1
+
+		wanted_slots := callee_slot_base + function.code.frame_slot_count
+		if wanted_slots > MAX_VM_SLOTS {
+			runtime_error("runtime stack limit exceeded.")
+			return Value{}, false
+		}
+
+		for i := argument_count; i < fixed_count; i += 1 {
+			vm.slots[callee_slot_base + i] = Value{}
+		}
+
+		if function.code.has_rest_param {
+			rest_count := argument_count - fixed_count
+			if rest_count < 0 {
+				rest_count = 0
+			}
+
+			items := make([dynamic]Value)
+			if rest_count > 0 {
+				reserve(&items, rest_count)
+			}
+
+			// Copy extras before replacing the first extra argument slot with the rest vector.
+			for i := 0; i < rest_count; i += 1 {
+				append(&items, vm.slots[callee_slot_base + fixed_count + i])
+			}
+
+			vm.slots[callee_slot_base + fixed_count] = Value(cast(^Object)new_vector_object(items))
+		}
+
+		if vm.frame_count >= MAX_CALL_FRAMES {
+			runtime_error("call depth limit exceeded.")
+			return Value{}, false
+		}
+
+		vm.frames[vm.frame_count] = CallFrame{
+			code              = function.code,
+			upvalues          = function.upvalues,
+			instruction_index = 0,
+			slot_base         = callee_slot_base,
+		}
+		vm.frame_count += 1
+
+		return Value{}, true
+
+	case .STRING, .SYMBOL, .LIST, .VECTOR, .MAP:
+		runtime_error("cannot call non-function value.")
+		return Value{}, false
+	}
+
+	assert(false, "invalid callable object kind")
+	return Value{}, false
+}
+
+call_function_value :: proc(vm: ^VM, function: Value, args: []Value) -> Value {
+	old_frame_count := vm.frame_count
+	frame := &vm.frames[old_frame_count - 1]
+	frame_top := frame.slot_base + frame.code.frame_slot_count
+	base := max(frame_top, vm.call_slot_top)
+	call_slot_top := base + 1 + len(args)
+
+	if call_slot_top > MAX_VM_SLOTS {
+		runtime_error("runtime stack limit exceeded.")
+		return Value{}
+	}
+
+	old_call_slot_top := vm.call_slot_top
+	vm.call_slot_top = call_slot_top
+
+	vm.slots[base] = function
+	for i := 0; i < len(args); i += 1 {
+		vm.slots[base + 1 + i] = args[i]
+	}
+
+	result, frame_pushed := start_function_call(vm, base, len(args))
+	if vm.error_string != "" { return Value{} }
+
+	if frame_pushed {
+		result = run_vm(vm, old_frame_count)
+		if vm.error_string != "" { return Value{} }
+
+		vm.call_slot_top = old_call_slot_top
+		return result
+	}
+
+	vm.call_slot_top = old_call_slot_top
+	return result
+}
+
+// Executes VM frames until the current call returns to stop_frame_count.
+run_vm :: proc(vm: ^VM, stop_frame_count: int) -> Value {
 	frame := &vm.frames[vm.frame_count - 1]
 	active_code := frame.code
 	bytecode := active_code.bytecode
@@ -5095,79 +5209,10 @@ run_code :: proc(code: ^Code) -> Value {
 			inst := InstABC(word)
 			base := slot_base + int(inst.a)
 			argument_count := int(inst.b)
-			callee := vm.slots[base]
+			result, frame_pushed := start_function_call(vm, base, argument_count)
+			if vm.error_string != "" { return Value{} }
 
-			callee_object, callee_is_object := callee.(^Object)
-			if !callee_is_object {
-				runtime_error("cannot call non-function value.")
-				return Value{}
-			}
-
-			switch callee_object.kind {
-			case .NATIVE_FUNCTION:
-				function := cast(^NativeFunctionObject)callee_object
-				args := vm.slots[base + 1:base + 1 + argument_count]
-
-				result := function.native(vm, args)
-				if vm.error_string != "" {
-					return Value{}
-				}
-
-				vm.slots[base] = result
-
-			case .FUNCTION:
-				function := cast(^FunctionObject)callee_object
-				fixed_count := function.code.fixed_param_count
-
-				if !function.code.has_rest_param && argument_count > fixed_count {
-					runtime_error(fmt.tprintf("function expected at most %d arguments, got %d.", fixed_count, argument_count))
-					return Value{}
-				}
-
-				callee_slot_base := base + 1
-
-				wanted_slots := callee_slot_base + function.code.frame_slot_count
-				if wanted_slots > MAX_VM_SLOTS {
-					runtime_error("runtime stack limit exceeded.")
-					return Value{}
-				}
-
-				for i := argument_count; i < fixed_count; i += 1 {
-					vm.slots[callee_slot_base + i] = Value{}
-				}
-
-				if function.code.has_rest_param {
-					rest_count := argument_count - fixed_count
-					if rest_count < 0 {
-						rest_count = 0
-					}
-
-					items := make([dynamic]Value)
-					if rest_count > 0 {
-						reserve(&items, rest_count)
-					}
-
-					// Copy extras before replacing the first extra argument slot with the rest vector.
-					for i := 0; i < rest_count; i += 1 {
-						append(&items, vm.slots[callee_slot_base + fixed_count + i])
-					}
-
-					vm.slots[callee_slot_base + fixed_count] = Value(cast(^Object)new_vector_object(items))
-				}
-
-				if vm.frame_count >= MAX_CALL_FRAMES {
-					runtime_error("call depth limit exceeded.")
-					return Value{}
-				}
-
-				vm.frames[vm.frame_count] = CallFrame{
-					code              = function.code,
-					upvalues          = function.upvalues,
-					instruction_index = 0,
-					slot_base         = callee_slot_base,
-				}
-				vm.frame_count += 1
-
+			if frame_pushed {
 				frame = &vm.frames[vm.frame_count - 1]
 				active_code = frame.code
 				bytecode = active_code.bytecode
@@ -5176,11 +5221,9 @@ run_code :: proc(code: ^Code) -> Value {
 				slot_base = frame.slot_base
 				pc = frame.instruction_index
 				continue
-
-			case .STRING, .SYMBOL, .LIST, .VECTOR, .MAP:
-				runtime_error("cannot call non-function value.")
-				return Value{}
 			}
+
+			vm.slots[base] = result
 
 		case .NEW_VECTOR:
 			// Capacity reserves backing storage; the new vector length is zero.
@@ -5583,14 +5626,13 @@ run_code :: proc(code: ^Code) -> Value {
 
 			close_upvalues_from(vm, slot_base)
 
-			if vm.frame_count == 1 {
+			vm.frame_count -= 1
+
+			if vm.frame_count == stop_frame_count {
 				return result
 			}
 
 			return_slot := slot_base - 1
-
-			vm.frame_count -= 1
-
 			vm.slots[return_slot] = result
 
 			frame = &vm.frames[vm.frame_count - 1]
@@ -5605,6 +5647,24 @@ run_code :: proc(code: ^Code) -> Value {
 			assert(false, "invalid opcode")
 		}
 	}
+}
+
+// Sets up top-level Code execution, then runs the VM loop.
+run_code :: proc(code: ^Code) -> Value {
+	vm := Active_VM
+
+	clear(&vm.open_upvalues)
+
+	vm.frames[0] = CallFrame{
+		code              = code,
+		upvalues          = nil,
+		instruction_index = 0,
+		slot_base         = 0,
+	}
+	vm.frame_count = 1
+	vm.call_slot_top = 0
+
+	return run_vm(vm, 0)
 }
 
 
