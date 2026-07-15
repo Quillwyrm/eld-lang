@@ -6,6 +6,7 @@ import "core:hash"
 import "core:mem"
 import "core:os"
 import filepath "core:path/filepath"
+import rand "core:math/rand"
 import "core:strconv"
 import "core:strings"
 
@@ -250,6 +251,8 @@ VM :: struct {
 
 	// End of active scratch call windows used by native-to-function calls.
 	native_call_slot_top: int,
+
+	rng_state: rand.Xoshiro256_Random_State,
 
 	builtins: [dynamic]Binding,
 	modules:  [dynamic]Module,
@@ -4445,6 +4448,9 @@ make_vm :: proc() -> VM {
 		modules       = make([dynamic]Module),
 		symbols       = make([dynamic]^SymbolObject),
 	}
+
+	// Default seed varies per VM; rand/seed is the reproducibility path.
+	rand.reset_u64(u64(intrinsics.read_cycle_counter()), rand.xoshiro256_random_generator(&vm.rng_state))
 
 	install_builtins(&vm)
 	install_core_modules(&vm)

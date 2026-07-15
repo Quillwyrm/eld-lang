@@ -4,6 +4,7 @@ import "base:intrinsics"
 import "core:fmt"
 import "core:io"
 import "core:math"
+import rand "core:math/rand"
 import "core:os"
 import filepath "core:path/filepath"
 import "core:strings"
@@ -2270,6 +2271,178 @@ native_math_smoothstep :: proc(vm: ^VM, args: []Value) -> Value {
 }
 
 
+// Rand module ====================================================================================
+
+// (seed seed) nil; Reset the VM's default random generator.
+native_rand_seed :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count(args, 1, "`rand/seed` expects one argument.\nusage: (rand/seed seed)") { return Value{} }
+
+	seed, seed_ok := check_int_arg(args, 0, "rand/seed", "first")
+	if !seed_ok { return Value{} }
+
+	rand.reset_u64(transmute(u64)seed, rand.xoshiro256_random_generator(&vm.rng_state))
+	return Value{}
+}
+
+// (float) float; Random float in [0.0, 1.0).
+native_rand_float :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count(args, 0, "`rand/float` expects no arguments.\nusage: (rand/float)") { return Value{} }
+
+	return Value(rand.float64(rand.xoshiro256_random_generator(&vm.rng_state)))
+}
+
+// (int min max) int; Random int in the inclusive range [min, max].
+native_rand_int :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count(args, 2, "`rand/int` expects two arguments.\nusage: (rand/int min max)") { return Value{} }
+
+	min_value, min_ok := check_int_arg(args, 0, "rand/int", "first")
+	if !min_ok { return Value{} }
+	max_value, max_ok := check_int_arg(args, 1, "rand/int", "second")
+	if !max_ok { return Value{} }
+
+	if min_value > max_value {
+		runtime_error("`rand/int` min must be <= max.")
+		return Value{}
+	}
+
+	width := u128(i128(max_value) - i128(min_value) + 1)
+	offset := rand.uint128_max(width, rand.xoshiro256_random_generator(&vm.rng_state))
+	return Value(i64(i128(min_value) + i128(offset)))
+}
+
+// (bool) bool; 50/50 random bool.
+// (bool chance) bool; true with finite chance in [0, 1].
+native_rand_bool :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count_range(args, 0, 1, "`rand/bool` expects zero or one argument.\nusage: (rand/bool)\n       (rand/bool chance)") { return Value{} }
+
+	if len(args) == 0 {
+		return Value(bool(rand.uint64_max(2, rand.xoshiro256_random_generator(&vm.rng_state)) == 1))
+	}
+
+	chance, chance_ok := check_number_arg(args, 0, "rand/bool", "first")
+	if !chance_ok { return Value{} }
+
+	if math.is_nan(chance) || math.is_inf(chance) || chance < 0 || chance > 1 {
+		runtime_error("`rand/bool` chance must be a finite number in [0, 1].")
+		return Value{}
+	}
+
+	if chance == 0 { return Value(bool(false)) }
+	if chance == 1 { return Value(bool(true)) }
+
+	return Value(bool(rand.float64(rand.xoshiro256_random_generator(&vm.rng_state)) < chance))
+}
+
+// (pick items) value; Uniformly pick one item from a non-empty vector.
+// (pick items weights) value; Weighted pick using positional non-negative finite weights.
+native_rand_pick :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count_range(args, 1, 2, "`rand/pick` expects one or two arguments.\nusage: (rand/pick vector)\n       (rand/pick vector weights)") { return Value{} }
+
+	items, items_ok := check_vector_arg(args, 0, "rand/pick", "first")
+	if !items_ok { return Value{} }
+
+	item_count := len(items.items)
+	if item_count == 0 {
+		runtime_error("`rand/pick` item vector must not be empty.")
+		return Value{}
+	}
+
+	if len(args) == 1 {
+		rng := rand.xoshiro256_random_generator(&vm.rng_state)
+		index := rand.int_range(0, item_count, rng)
+		return items.items[index]
+	}
+
+	weights, weights_ok := check_vector_arg(args, 1, "rand/pick", "second")
+	if !weights_ok { return Value{} }
+
+	if len(weights.items) != item_count {
+		runtime_error("`rand/pick` weights length must match item vector length.")
+		return Value{}
+	}
+
+	total_weight: f64
+	last_positive_index := -1
+
+	for i := 0; i < item_count; i += 1 {
+		weight_value := weights.items[i]
+
+		weight_int, weight_is_int := weight_value.(i64)
+		weight: f64
+		if weight_is_int {
+			weight = f64(weight_int)
+		} else {
+			weight_float, weight_is_float := weight_value.(f64)
+			if !weight_is_float {
+				runtime_error("`rand/pick` expected number items in weights vector.")
+				return Value{}
+			}
+
+			weight = weight_float
+		}
+
+		if math.is_nan(weight) || math.is_inf(weight) || weight < 0 {
+			runtime_error("`rand/pick` weights must be finite non-negative numbers.")
+			return Value{}
+		}
+
+		if weight > 0 {
+			last_positive_index = i
+		}
+
+		total_weight += weight
+	}
+
+	if total_weight <= 0 {
+		runtime_error("`rand/pick` weight total must be greater than zero.")
+		return Value{}
+	}
+	if math.is_inf(total_weight) {
+		runtime_error("`rand/pick` weight total must be finite.")
+		return Value{}
+	}
+
+	rng := rand.xoshiro256_random_generator(&vm.rng_state)
+	roll := rand.float64(rng) * total_weight
+	for i := 0; i < item_count; i += 1 {
+		weight_value := weights.items[i]
+
+		weight_int, weight_is_int := weight_value.(i64)
+		weight: f64
+		if weight_is_int {
+			weight = f64(weight_int)
+		} else {
+			weight = weight_value.(f64)
+		}
+
+		if roll < weight {
+			return items.items[i]
+		}
+
+		roll -= weight
+	}
+
+	return items.items[last_positive_index]
+}
+
+// (shuffle vector) vector; In-place Fisher-Yates shuffle, returning the same vector.
+native_rand_shuffle :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count(args, 1, "`rand/shuffle` expects one argument.\nusage: (rand/shuffle vector)") { return Value{} }
+
+	vector, vector_ok := check_vector_arg(args, 0, "rand/shuffle", "first")
+	if !vector_ok { return Value{} }
+
+	rng := rand.xoshiro256_random_generator(&vm.rng_state)
+
+	for i := len(vector.items) - 1; i >= 1; i -= 1 {
+		j := rand.int_range(0, i + 1, rng)
+		vector.items[i], vector.items[j] = vector.items[j], vector.items[i]
+	}
+
+	return args[0]
+}
+
+
 // String module ==================================================================================
 
 // (has? text part) bool; true if text contains part.
@@ -3115,6 +3288,18 @@ install_core_modules :: proc(vm: ^VM) {
 	bind_module_native_function(vm, &math_exports, "wrap", native_math_wrap)
 	bind_module_native_function(vm, &math_exports, "smoothstep", native_math_smoothstep)
 	install_native_module(vm, "math", math_exports[:])
+
+	// rand
+	rand_exports := make([dynamic]Binding)
+	defer delete(rand_exports)
+
+	bind_module_native_function(vm, &rand_exports, "seed", native_rand_seed)
+	bind_module_native_function(vm, &rand_exports, "float", native_rand_float)
+	bind_module_native_function(vm, &rand_exports, "int", native_rand_int)
+	bind_module_native_function(vm, &rand_exports, "bool", native_rand_bool)
+	bind_module_native_function(vm, &rand_exports, "pick", native_rand_pick)
+	bind_module_native_function(vm, &rand_exports, "shuffle", native_rand_shuffle)
+	install_native_module(vm, "rand", rand_exports[:])
 
 	// os
 	os_exports := make([dynamic]Binding)
