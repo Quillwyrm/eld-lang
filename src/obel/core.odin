@@ -2482,6 +2482,60 @@ native_str_suffix :: proc(vm: ^VM, args: []Value) -> Value {
 	return Value(bool(strings.has_suffix(text, suffix)))
 }
 
+// (lines text) vector; Logical lines without line terminators.
+native_str_lines :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count(args, 1, "`str/lines` expects one argument.\nusage: (str/lines text)") { return Value{} }
+
+	text, text_ok := check_string_arg(args, 0, "str/lines", "first")
+	if !text_ok { return Value{} }
+
+	items := make([dynamic]Value)
+
+	line_start := 0
+	for i := 0; i < len(text); i += 1 {
+		if text[i] != '\n' {
+			continue
+		}
+
+		line_end := i
+		if line_end > line_start && text[line_end - 1] == '\r' {
+			line_end -= 1
+		}
+
+		append(&items, Value(cast(^Object)new_string_object(text[line_start:line_end])))
+		line_start = i + 1
+	}
+
+	if line_start < len(text) {
+		append(&items, Value(cast(^Object)new_string_object(text[line_start:])))
+	}
+
+	return Value(cast(^Object)new_vector_object(items))
+}
+
+// (words text) vector; Runs of non-whitespace text.
+native_str_words :: proc(vm: ^VM, args: []Value) -> Value {
+	if !check_arg_count(args, 1, "`str/words` expects one argument.\nusage: (str/words text)") { return Value{} }
+
+	text, text_ok := check_string_arg(args, 0, "str/words", "first")
+	if !text_ok { return Value{} }
+
+	parts, err := strings.fields(text)
+	if err != nil {
+		runtime_error("`str/words` failed to allocate result vector.")
+		return Value{}
+	}
+	defer delete(parts)
+
+	items := make([dynamic]Value)
+	reserve(&items, len(parts))
+	for part in parts {
+		append(&items, Value(cast(^Object)new_string_object(part)))
+	}
+
+	return Value(cast(^Object)new_vector_object(items))
+}
+
 // (split text separator) vector; Split text by separator into strings.
 native_str_split :: proc(vm: ^VM, args: []Value) -> Value {
 	if !check_arg_count(args, 2, "`str/split` expects two arguments.\nusage: (str/split text separator)") { return Value{} }
@@ -3306,6 +3360,8 @@ install_core_modules :: proc(vm: ^VM) {
 	bind_module_native_function(vm, &str_exports, "has?", native_str_has)
 	bind_module_native_function(vm, &str_exports, "prefix?", native_str_prefix)
 	bind_module_native_function(vm, &str_exports, "suffix?", native_str_suffix)
+	bind_module_native_function(vm, &str_exports, "lines", native_str_lines)
+	bind_module_native_function(vm, &str_exports, "words", native_str_words)
 	bind_module_native_function(vm, &str_exports, "split", native_str_split)
 	bind_module_native_function(vm, &str_exports, "join", native_str_join)
 	bind_module_native_function(vm, &str_exports, "find", native_str_find)

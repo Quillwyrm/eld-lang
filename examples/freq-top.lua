@@ -28,50 +28,14 @@ end
 local text = file:read("*a")
 file:close()
 
-local function split(text, sep)
-	local parts = {}
-	local start = 1
-
-	while true do
-		local found = string.find(text, sep, start, true)
-		if found == nil then
-			parts[#parts + 1] = string.sub(text, start)
-			return parts
-		end
-
-		parts[#parts + 1] = string.sub(text, start, found - 1)
-		start = found + #sep
-	end
-end
-
-local function line_words(line)
-	local words = {}
-
-	for _, word in ipairs(split(string.lower(line), " ")) do
-		if word ~= "" then
-			words[#words + 1] = word
-		end
-	end
-
-	return words
-end
-
-local function append_line_words(words, line)
-	for _, word in ipairs(line_words(line)) do
-		words[#words + 1] = word
-	end
-
-	return words
-end
-
 local function count_word(counts, word)
 	counts[word] = (counts[word] or 0) + 1
 	return counts
 end
 
 local words = {}
-for _, line in ipairs(split(text, "\n")) do
-	append_line_words(words, line)
+for word in string.gmatch(string.lower(text), "%S+") do
+	words[#words + 1] = word
 end
 
 local counts = {}

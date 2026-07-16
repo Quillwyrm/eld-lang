@@ -83,7 +83,7 @@
     ext))
 
 (def (count-text text)
-  (def lines (str/split text "\n"))
+  (def lines (str/lines text))
   (var count 0)
 
   (each line lines

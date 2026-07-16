@@ -24,17 +24,6 @@
 
 (if err (do (print err) (os/exit 1)))
 
-(def (non-empty? word)
-  (not (empty? word)))
-
-(def (line-words line)
-  (filter non-empty? (str/split (str/lower line) " ")))
-
-(def (append-line-words words line)
-  (each word (line-words line)
-    (push words word))
-  words)
-
 (def (count-word counts word)
   (set (key counts word) (+ (?? (key counts word) 0) 1))
   counts)
@@ -47,7 +36,7 @@
 
 ; Build [word count] entries. Sort by word first so equal counts print alphabetically.
 (def
-  words  (reduce append-line-words [] (str/split text "\n"))
+  words  (str/words (str/lower text))
   counts (reduce count-word {} words)
   ranked (sort-by entry-count > (sort-by entry-word (pairs counts))))
 
